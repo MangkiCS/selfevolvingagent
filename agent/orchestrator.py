@@ -66,7 +66,7 @@ def run_local_checks():
         sh("bandit -r .", check=False)
     except Exception:
         pass
-    sh("pytest -q --maxfail=1 --disable-warnings --cov=.", check=True)
+    sh("pytest -q --maxfail=1 --disable-warnings --cov=. --cov-config=.config/coverage.toml", check=True)
 
 def commit_all(msg: str):
     sh("git add -A")
