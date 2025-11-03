@@ -26,7 +26,8 @@ jobs:
 
       - name: Run orchestrator (stub)
         env:
-          # WICHTIG: macht das Top-Level-Verzeichnis importierbar -> 'import agent' klappt
           PYTHONPATH: ${{ github.workspace }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # <— neu: Token für die GitHub API
+          GITHUB_REPOSITORY: ${{ github.repository }} # <— optional, zur Sicherheit
         run: |
           python agent/orchestrator.py --mode daily || python agent/orchestrator.py
