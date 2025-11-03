@@ -65,13 +65,23 @@ def test_say_hello():
 ''')
 
 def run_local_checks():
-    # Lint/Type/Security sind nice-to-have; pytest muss grün sein
+    # Stil automatisch reparieren
     try:
-        sh("ruff check .", check=False)
-        sh("mypy .", check=False)
-        sh("bandit -r .", check=False)
+        sh("ruff check --fix .", check=False)
+        # falls Fixes erfolgt sind, committen (kommentarlos, wenn nichts zu committen ist)
+        try:
+            sh("git add -A", check=False)
+            sh("git commit -m 'style(auto): ruff --fix' ", check=False)
+        except Exception:
+            pass
     except Exception:
         pass
+
+    # Typing/Security als Warnungen behandeln
+    sh("mypy .", check=False)
+    sh("bandit -r .", check=False)
+
+    # Tests mit Coverage-Gate (schlägt den Run ab, wenn rot)
     sh("pytest -q --maxfail=1 --disable-warnings --cov=. --cov-config=.config/coverage.toml", check=True)
 
 def commit_all(msg: str):
