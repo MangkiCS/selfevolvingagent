@@ -34,7 +34,7 @@ jobs:
       - name: Tests
         env:
           PYTHONPATH: ${{ github.workspace }}
-        run: pytest -q --maxfail=1 --disable-warnings --cov=.
+        run: pytest -q --maxfail=1 --disable-warnings --cov=. --cov-config=.config/coverage.toml
 
 
   merge-on-green:
