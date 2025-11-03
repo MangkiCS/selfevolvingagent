@@ -6,7 +6,13 @@ Orchestrator MVP:
 - erstellt PR via GitHub API, vergibt Label 'auto'
 - führt (optional) pytest lokal aus, bevor gepusht wird
 """
-import os, subprocess, pathlib, datetime, json, sys
+import os
+import subprocess
+import pathlib
+import datetime
+import json
+import sys
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
