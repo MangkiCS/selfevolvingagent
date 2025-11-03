@@ -1,3 +1,37 @@
+name: pr-gates
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install -r requirements.txt -r dev-requirements.txt
+      - name: Lint & Typecheck
+        run: |
+          ruff check .
+          mypy .
+      - name: Security scan
+        run: pip install bandit && bandit -r .
+      - name: Tests
+        run: pytest -q --maxfail=1 --disable-warnings --cov=.
+  auto-merge:
+    needs: quality
+    if: ${{ success() && contains(github.event.pull_request.labels.*.name, 'auto') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge if all checks passed
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          merge-method: squash
+
   merge-on-green:
     needs: quality
     if: ${{ github.event_name == 'pull_request'
