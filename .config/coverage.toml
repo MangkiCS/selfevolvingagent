@@ -1,0 +1,7 @@
+[run]
+branch = true
+source = ["agent"]
+
+[report]
+fail_under = 0
+show_missing = true

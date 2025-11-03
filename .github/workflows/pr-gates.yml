@@ -1,0 +1,28 @@
+name: pr-gates
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Install deps
+        run: |
+          pip install -r agent/requirements.txt
+          pip install ruff mypy bandit pytest pytest-cov
+      - name: Lint
+        run: ruff check .
+      - name: Typecheck
+        run: mypy .
+      - name: Security
+        run: bandit -r .
+      - name: Tests
+        run: pytest -q --maxfail=1 --disable-warnings --cov=.

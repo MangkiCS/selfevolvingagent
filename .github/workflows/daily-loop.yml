@@ -1,0 +1,26 @@
+name: daily-loop
+on:
+  schedule:
+    - cron: "15 6 * * *"  # 06:15 UTC ≙ 07:15 CET / 08:15 CEST (Berlin)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Install deps
+        run: |
+          pip install -r agent/requirements.txt
+          pip install pytest pytest-cov ruff mypy bandit
+      - name: Run orchestrator (stub)
+        run: |
+          python agent/orchestrator.py --mode daily || python agent/orchestrator.py
