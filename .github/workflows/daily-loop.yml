@@ -15,12 +15,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
+
       - name: Install deps
         run: |
           pip install -r agent/requirements.txt
           pip install pytest pytest-cov ruff mypy bandit
+
       - name: Run orchestrator (stub)
+        env:
+          # WICHTIG: macht das Top-Level-Verzeichnis importierbar -> 'import agent' klappt
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           python agent/orchestrator.py --mode daily || python agent/orchestrator.py
