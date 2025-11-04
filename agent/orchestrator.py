@@ -120,7 +120,7 @@ def build_repo_snapshot(
 
 
 # ---------------- OpenAI (Responses API) ----------------
-DEFAULT_API_TIMEOUT = 180.0
+DEFAULT_API_TIMEOUT = 1800.0
 DEFAULT_API_MAX_RETRIES = 2
 DEFAULT_API_POLL_INTERVAL = 1.5
 DEFAULT_API_REQUEST_TIMEOUT = 30.0
