@@ -1,27 +1,34 @@
-# Roadmap
+# Roadmap: Self-Evolving Automation Agent
 
-_Status legend: [ ] TODO • [/] In Progress • [x] Done_
+## Purpose
+Provide a living backlog that guides the transformation from the current MVP into a production-ready automation engineer capable of delivering real features autonomously.
 
-This document is maintained by the agent. Update statuses, add discoveries, and record follow-up items after every meaningful change.
+## Phase 0 – Baseline Assessment
+- Audit `agent/orchestrator.py` to understand branch creation, prompt loading, and fallback behaviour.
+- Catalogue existing modules, tests, and tooling gaps.
+- Document findings and architectural questions.
 
-## Milestone 1 — Stabilize the orchestrator foundation
-- [ ] Document the current `agent/orchestrator.py` control flow and module responsibilities (target: `docs/ARCHITECTURE.md`).
-- [ ] Replace the `add_example_code()` fallback with a task/backlog-driven execution path that only touches intended files.
-- [ ] Capture the developer workflow in `README.md` (how to trigger runs, quality gates, branching model).
+## Phase 1 – Replace the Placeholder Fallback
+1. Specify the desired task intake mechanism (e.g., structured request files, API queue).
+2. Refactor the orchestrator to read actionable work instead of rewriting sample modules.
+3. Introduce configuration and state management needed to track task progress.
+4. Add comprehensive tests (unit and integration) covering the new orchestration flow.
 
-## Milestone 2 — Backlog-driven execution
-- [ ] Design and implement a persistent backlog format (e.g., `backlog.yaml`) that the orchestrator can read and update.
-- [ ] Introduce a planning component that selects the next actionable task and passes focused prompts to the coding agent.
-- [ ] Add safeguards to skip executions when no actionable backlog items exist, avoiding noop commits.
+## Phase 2 – Execution Capabilities
+- Build core automation primitives (code editing, diff planning, test running, reporting).
+- Implement robust error handling, retries, and logging.
+- Ensure security checks (bandit, dependencies) surface actionable feedback.
 
-## Milestone 3 — External request fulfillment
-- [ ] Support ingesting structured feature requests (files, templates, or API input) and mapping them to backlog tasks.
-- [ ] Expand automated validation (integration tests, smoke environments) to increase confidence in generated changes.
-- [ ] Provide tooling to summarize completed work and surface follow-up items in PR descriptions or changelogs.
+## Phase 3 – External Integrations
+- Connect to real task sources (ticketing systems, Git providers) once credentials and APIs are available.
+- Add notification/approval workflows as required by operators.
 
-## Open Questions
-- How should external operators submit new work items (file drop, API, issue tracker)?
-- What secrets or credentials will be required for integrations beyond the local checks?
+## Ongoing Engineering Practices
+- Maintain high test coverage and static analysis hygiene (ruff, mypy, bandit, pytest).
+- Record significant design choices in decision logs.
+- Keep documentation current with each iteration.
 
-## Recently Completed
-- _Nothing yet — this is the baseline snapshot._
+## Immediate Next Steps
+- Document the current orchestrator control flow and identify seams for injecting real task handling.
+- Draft a design for a persistent task queue or request format to replace `add_example_code`.
+- Begin implementing the new orchestration pathway with supporting tests.
