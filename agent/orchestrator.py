@@ -2,9 +2,10 @@
 """
 Orchestrator MVP (secure subprocess):
 - erzeugt Feature-Branch auto/YYYYMMDD-HHMMSS
-- schreibt Beispielcode + Tests, committet, pusht
-- erstellt PR via GitHub API, vergibt Label 'auto'
-- führt pytest lokal aus, bevor gepusht wird
+- ruft optional ein Code-Modell (Responses API) auf
+- schreibt Patches/Tests oder fällt auf Beispielcode zurück
+- committet, pusht, erstellt PR + Label 'auto'
+- führt pytest mit Coverage-Gate aus
 """
 import datetime
 import json
@@ -12,26 +13,20 @@ import os
 import pathlib
 import subprocess
 import sys
-from typing import Optional
+from typing import Optional, List
+
 from openai import OpenAI
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
-def sh(args: list[str], check: bool = True, cwd: pathlib.Path = ROOT) -> str:
-    """Sichere Shell: kein shell=True, Übergabe als Argumentliste."""
+# ---------------- Shell helper (ohne shell=True) ----------------
+def sh(args: List[str], check: bool = True, cwd: pathlib.Path = ROOT) -> str:
     print(f"$ {' '.join(args)}")
-    res = subprocess.run(
-        args,
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    res = subprocess.run(args, cwd=str(cwd), capture_output=True, text=True)
     if res.stdout:
         print(res.stdout)
     if res.stderr:
-        # stderr auch ausgeben (hilft in Actions-Logs)
         print(res.stderr, file=sys.stderr)
     if check and res.returncode != 0:
         raise RuntimeError(f"Command failed: {' '.join(args)}")
@@ -44,8 +39,9 @@ def write(path: str, content: str) -> None:
     p.write_text(content, encoding="utf-8")
 
 
+# ---------------- Git helpers ----------------
 def ensure_git_identity() -> None:
-    # Setze sichere Defaults (überschreibt nur, wenn leer)
+    # setzt Defaults, überschreibt nur wenn leer
     sh(["git", "config", "user.email", "actions@github.com"], check=False)
     sh(["git", "config", "user.name", "github-actions[bot]"], check=False)
 
@@ -56,26 +52,70 @@ def create_branch() -> str:
     sh(["git", "checkout", "-b", branch])
     return branch
 
-def call_code_model(system: str, user: str):
+
+def commit_all(msg: str) -> None:
+    sh(["git", "add", "-A"], check=False)
+    status = sh(["git", "status", "--porcelain"], check=False).strip()
+    if not status:
+        # Nichts zu committen -> erzeugen wir eine kleine Buildmarke
+        ts = datetime.datetime.utcnow().isoformat()
+        autopath = ROOT / "docs" / "AUTOCOMMIT.md"
+        prev = autopath.read_text(encoding="utf-8") if autopath.exists() else "# Auto log\n"
+        write("docs/AUTOCOMMIT.md", prev + f"- auto: {ts}\n")
+        sh(["git", "add", "docs/AUTOCOMMIT.md"])
+    sh(["git", "commit", "-m", msg])
+
+
+def push_branch(branch: str) -> None:
+    sh(["git", "push", "-u", "origin", branch])
+
+
+# ---------------- OpenAI (Responses API) ----------------
+def call_code_model(system: str, user: str) -> dict:
     """
-    Ruft GPT-5-Codex über die Responses API auf und erwartet strikt JSON.
-    Setze OPENAI_API_KEY als Secret in GitHub (Settings → Secrets → Actions).
+    Ruft GPT-5-Codex (oder kompatibles Modell) über die Responses API auf.
+    Ohne `response_format` (kompatibel mit aktuellen SDKs); wir parsen JSON aus output_text.
     """
-    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     resp = client.responses.create(
         model="gpt-5-codex",
         input=[
             {"role": "system", "content": system},
-            {"role": "user",   "content": user}
+            {"role": "user", "content": user},
         ],
         temperature=0.2,
-        response_format={"type": "json_object"},  # zwingt valides JSON
+        # response_format weggelassen -> per Prompt striktes JSON verlangen
     )
-    # Je nach SDK-Version:
-    raw = getattr(resp, "output_text", None) or resp.output[0].content[0].text
-    return json.loads(raw)
+
+    text = getattr(resp, "output_text", None)
+    if not text:
+        # Fallback: zusammensetzen, falls kein output_text vorhanden ist
+        try:
+            # resp.output ist eine Liste von Nachrichten/Teilen
+            text = "".join(
+                "".join(part.get("text", "") for part in item.get("content", []))  # type: ignore
+                if isinstance(item, dict) else ""
+                for item in getattr(resp, "output", [])
+            )
+        except Exception:
+            text = ""
+
+    try:
+        return json.loads(text) if text else {}
+    except Exception:
+        # notfalls leeres Ergebnis -> Fallback greift
+        return {}
 
 
+def apply_plan(plan: dict) -> None:
+    """Schreibt vom Modell gelieferte Patches/Tests ins Repo."""
+    for p in plan.get("code_patches", []) or []:
+        write(p["path"], p["content"])
+    for t in plan.get("new_tests", []) or []:
+        write(t["path"], t["content"])
+
+
+# ---------------- Beispielcode (Fallback) ----------------
 def add_example_code() -> None:
     write("agent/__init__.py", "")
     write("agent/core/__init__.py", "")
@@ -90,6 +130,9 @@ def say_hello(name: str) -> str:
     return f"{GREETING}, {name}!"
 ''',
     )
+    # Build-Marker -> sorgt dafür, dass immer ein Commit entsteht
+    ts = datetime.datetime.utcnow().isoformat()
+    write("agent/core/buildinfo.py", f'BUILD_TS = "{ts}"\n')
     write(
         "tests/test_hello.py",
         '''from agent.core.hello import say_hello
@@ -100,18 +143,19 @@ def test_say_hello():
     )
 
 
+# ---------------- Checks ----------------
 def run_local_checks() -> None:
-    # Style auto-fixen, dann committen falls Änderungen
+    # Stil automatisch reparieren -> optional committen
     sh(["ruff", "check", "--fix", "."], check=False)
     sh(["git", "add", "-A"], check=False)
     sh(["git", "commit", "-m", "style(auto): ruff --fix"], check=False)
 
     # Typing/Security als Warnung lokal
     sh(["mypy", "."], check=False)
-    # Nur High-Severity betrachten (Policy: fail on High)
+    # Nur High-Severity (Policy): Build darf bei High scheitern
     sh(["bandit", "-r", ".", "-lll"], check=False)
 
-    # Tests mit Coverage-Gate (hartes Gate)
+    # Tests mit Coverage-Gate (hart)
     sh(
         [
             "pytest",
@@ -120,28 +164,16 @@ def run_local_checks() -> None:
             "--disable-warnings",
             "--cov=.",
             "--cov-config=.config/coverage.toml",
-        ],
-        check=True,
+        ]
     )
 
 
-def commit_all(msg: str) -> None:
-    sh(["git", "add", "-A"])
-    sh(["git", "commit", "-m", msg])
-
-
-def push_branch(branch: str) -> None:
-    sh(["git", "push", "-u", "origin", branch])
-
-
+# ---------------- GitHub API (PR) ----------------
 def gh_api(method: str, path: str, data: Optional[dict] = None) -> dict:
-    """Kleiner GitHub-API-Helper (nutzt das GITHUB_TOKEN aus der Action)."""
     repo = os.environ.get("GITHUB_REPOSITORY")
     token = os.environ.get("GITHUB_TOKEN")
     if not repo or not token:
-        print(
-            "GITHUB_REPOSITORY oder GITHUB_TOKEN nicht gesetzt; PR wird evtl. nicht automatisch erstellt."
-        )
+        print("GITHUB_REPOSITORY oder GITHUB_TOKEN nicht gesetzt; PR wird evtl. nicht automatisch erstellt.")
         return {}
     import urllib.request
 
@@ -149,12 +181,12 @@ def gh_api(method: str, path: str, data: Optional[dict] = None) -> dict:
     req = urllib.request.Request(url, method=method.upper())
     req.add_header("Authorization", f"Bearer {token}")
     req.add_header("Accept", "application/vnd.github+json")
-    body_bytes = None
+    body = None
     if data is not None:
-        body_bytes = json.dumps(data).encode("utf-8")
+        body = json.dumps(data).encode("utf-8")
         req.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(req, body_bytes) as resp:
+        with urllib.request.urlopen(req, body) as resp:
             return json.loads(resp.read().decode())
     except Exception as e:
         print(f"GitHub API error: {e}", file=sys.stderr)
@@ -162,11 +194,7 @@ def gh_api(method: str, path: str, data: Optional[dict] = None) -> dict:
 
 
 def ensure_label_auto() -> None:
-    gh_api(
-        "POST",
-        "/labels",
-        {"name": "auto", "color": "0E8A16", "description": "Auto-merge on green checks"},
-    )
+    gh_api("POST", "/labels", {"name": "auto", "color": "0E8A16", "description": "Auto-merge on green checks"})
 
 
 def create_pull_request(branch: str) -> Optional[int]:
@@ -194,31 +222,22 @@ def create_pull_request(branch: str) -> Optional[int]:
     return None
 
 
-def apply_plan(plan: dict) -> None:
-    """Schreibt vom Modell gelieferte Patches/Tests ins Repo."""
-    for p in plan.get("code_patches", []):
-        write(p["path"], p["content"])
-    for t in plan.get("new_tests", []):
-        write(t["path"], t["content"])
-
-
+# ---------------- Main ----------------
 def main() -> int:
     ensure_git_identity()
     branch = create_branch()
 
-    # --- LLM-Call mit Prompts (optional) ---
     used_llm = False
     try:
         system = (ROOT / "agent/prompts/system.md").read_text(encoding="utf-8")
         user = (ROOT / "agent/prompts/task_template.md").read_text(encoding="utf-8")
-        plan = call_code_model(system, user)  # <- jetzt mit Argumenten
+        plan = call_code_model(system, user)
         if isinstance(plan, dict) and (plan.get("code_patches") or plan.get("new_tests")):
             apply_plan(plan)
             used_llm = True
     except Exception as e:
         print(f"LLM call failed; fallback to example code: {e}", file=sys.stderr)
 
-    # --- Fallback falls LLM nichts geliefert hat ---
     if not used_llm:
         add_example_code()
 
