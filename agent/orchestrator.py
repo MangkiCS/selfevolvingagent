@@ -85,7 +85,6 @@ def call_code_model(system: str, user: str) -> dict:
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        temperature=0.2,
         # response_format weggelassen -> per Prompt striktes JSON verlangen
     )
 
