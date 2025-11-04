@@ -31,7 +31,7 @@ jobs:
         run: mypy .
 
       - name: Security
-        run: bandit -r .
+        run: bandit -r . -lll
 
       - name: Tests
         env:
