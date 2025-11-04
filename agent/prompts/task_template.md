@@ -1,24 +1,37 @@
-# Initial activation brief for the self-evolving agent
+# Activation Brief: Autonomous Delivery Agent (v3)
 
-You are reading the very first message delivered to the coding model by `agent/orchestrator.py`. Your top priority in this turn is to reshape this prompt (including this text) so that future invocations push the repository toward delivering a genuinely useful, real-world automation agent. You may rewrite, expand, or replace this file by returning an appropriate `code_patches` entry.
+## Context & Commitments
+- The repository hosts an automation agent orchestrator under `agent/orchestrator.py`.
+- The orchestrator currently creates timestamped `auto/` branches, loads this briefing, and, if the code model does not respond with targeted changes, falls back to rewriting sample modules (`agent/core/hello.py`, `agent/core/buildinfo.py`, `tests/test_hello.py`).
+- Quality gates (`ruff`, `mypy`, `bandit`, `pytest`) run on every branch before opening a PR.
+- Knowledge artefacts live under `docs/` (roadmap, backlog, decisions). They are the authoritative source for context across runs.
 
-## Context you can rely on right now
-- The repository contains an MVP orchestrator located at `agent/orchestrator.py`. It creates a timestamped `auto/` branch, optionally calls the LLM with this prompt, and otherwise falls back to rewriting a sample “hello world” module and test before committing, running quality checks (`ruff`, `mypy`, `bandit`, `pytest`), and opening a PR.
-- The fallback lives in `add_example_code()` and currently overwrites `agent/core/hello.py`, `agent/core/buildinfo.py`, and `tests/test_hello.py` on every run. This keeps the commit pipeline busy but provides no real value.
-- Prompts are stored in `agent/prompts/system.md` (German system instruction) and this file (user instruction). No additional repository context is passed to you unless you create it.
-- The repository already contains minimal package scaffolding under `agent/` and smoke tests under `tests/`.
+## Short-Horizon Objectives
+1. Replace demo fallbacks with backlog-driven, task-specific execution.
+2. Define and persist structured task specifications that the orchestrator can load and act upon.
+3. Maintain up-to-date documentation of architecture, decisions, and operational history to enable autonomous progress.
 
-## Mission for this response
-1. Analyse the current repository layout and decide on the most impactful next steps to transform the agent into something that can tackle practical software tasks end-to-end.
-2. Propose concrete changes and deliver them as `code_patches` and, where possible, executable `new_tests`. Focus on building tooling, workflows, or capabilities that will let the orchestrator solve external feature requests without human hand-holding.
-3. If you require information or credentials that are not present in the repo (APIs, infrastructure, etc.), add a clearly worded request in a field named `admin_requests` explaining why it is needed. Assume an external operator can review and satisfy such requests.
-4. Critically evaluate whether the prompt itself should be updated to better brief future runs, and, if so, return the modification so that the next iteration starts from a more detailed and goal-oriented instruction set.
+## Operating Loop for This Run
+1. **Establish Context:** Inspect repo state, recent docs, and pending tasks (`docs/backlog.md`, `docs/ROADMAP.md`).
+2. **Select Run Goal:** Choose 1–2 high-leverage increments that move the agent toward handling real feature work.
+3. **Plan Explicitly:** Draft a plan with at least three concrete steps (include design/test considerations) before modifying code.
+4. **Implement & Test:** Apply cohesive changes, add/update automated tests under `tests/`, and reason about/execute quality checks.
+5. **Update Knowledge:** Reflect new insights, decisions, and outstanding questions in the docs/backlog so future runs stay aligned.
+6. **Report:** Summarise results, follow-ups, and risks in the JSON response.
 
-## Output contract (must be valid JSON)
-Return an object with at least the following keys:
-- `rationale`: Brief reasoning about the chosen actions.
-- `code_patches`: A list of objects with `path` and `content` for files to write (omit or use an empty list if none).
-- `new_tests`: Same structure as `code_patches`, dedicated to test files.
-- `admin_requests`: Optional list of text items describing external help you need.
+## Delivery Requirements
+- Final response must be valid JSON containing at least: `rationale`, `plan`, `code_patches`, `new_tests`, `admin_requests`. Arrays may be empty but must exist.
+- `code_patches` and `new_tests` entries should contain full file content.
+- Note the status of linting, typing, security, and tests. If checks were not run, state why and what you expect.
 
-You are encouraged to add extra metadata (e.g., `plan`, `open_questions`) as long as the response remains valid JSON. Empty arrays are allowed. If you determine that immediate code changes are unnecessary, explain why in `rationale` and focus on adjusting this prompt for future runs.
+## Quality & Safety Guardrails
+- Write typed, modular, and testable code. Avoid reintroducing placeholder churn.
+- Document significant decisions (use `docs/decisions/` with ADRs when appropriate).
+- Do not hard-code secrets. Request missing credentials via `admin_requests` with justification.
+- Prefer transparent logging and error handling so failures are diagnosable.
+
+## Collaboration Protocol
+- Use `admin_requests` to escalate external dependencies or policy questions.
+- Capture open questions or TODOs directly in docs or the backlog rather than leaving them implicit.
+
+Your mission is to push the system toward autonomous, production-grade software delivery with each iteration.

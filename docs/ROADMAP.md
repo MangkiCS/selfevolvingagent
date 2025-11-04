@@ -29,6 +29,6 @@ Provide a living backlog that guides the transformation from the current MVP int
 - Keep documentation current with each iteration.
 
 ## Immediate Next Steps
-- Document the current orchestrator control flow and identify seams for injecting real task handling.
-- Draft a design for a persistent task queue or request format to replace `add_example_code`.
-- Begin implementing the new orchestration pathway with supporting tests.
+- [x] Document the current orchestrator control flow and identify seams for injecting real task handling (see `docs/orchestrator_overview.md`).
+- [ ] Draft a design for a persistent task queue or request format to replace `add_example_code`.
+- [ ] Begin implementing the new orchestration pathway with supporting tests.
