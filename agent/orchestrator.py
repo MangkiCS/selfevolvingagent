@@ -13,6 +13,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import time
 from typing import List, Optional
 
 from openai import OpenAI
@@ -119,38 +120,64 @@ def build_repo_snapshot(
 
 
 # ---------------- OpenAI (Responses API) ----------------
+DEFAULT_API_TIMEOUT = float(os.environ.get("OPENAI_API_TIMEOUT", "60"))
+DEFAULT_API_MAX_RETRIES = int(os.environ.get("OPENAI_API_MAX_RETRIES", "2"))
+
+
 def call_code_model(system: str, user: str) -> dict:
     """
     Ruft GPT-5-Codex (oder kompatibles Modell) über die Responses API auf.
     Ohne `response_format` (kompatibel mit aktuellen SDKs); wir parsen JSON aus output_text.
     """
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-    resp = client.responses.create(
-        model="gpt-5-codex",
-        input=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        # response_format weggelassen -> per Prompt striktes JSON verlangen
-    )
+    timeout = float(os.environ.get("OPENAI_API_TIMEOUT", DEFAULT_API_TIMEOUT))
+    max_retries = int(os.environ.get("OPENAI_API_MAX_RETRIES", DEFAULT_API_MAX_RETRIES))
+    if max_retries < 1:
+        max_retries = 1
 
-    text = getattr(resp, "output_text", None)
-    if not text:
-        # Fallback: zusammensetzen, falls kein output_text vorhanden ist
+    last_error: Optional[Exception] = None
+    for attempt in range(1, max_retries + 1):
         try:
-            text = "".join(
-                "".join(part.get("text", "") for part in item.get("content", []))  # type: ignore
-                if isinstance(item, dict) else ""
-                for item in getattr(resp, "output", [])
+            resp = client.responses.create(
+                model="gpt-5-codex",
+                input=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                # response_format weggelassen -> per Prompt striktes JSON verlangen
+                timeout=timeout,
             )
-        except Exception:
-            text = ""
 
-    try:
-        return json.loads(text) if text else {}
-    except Exception:
-        # notfalls leeres Ergebnis -> Fallback greift
-        return {}
+            text = getattr(resp, "output_text", None)
+            if not text:
+                # Fallback: zusammensetzen, falls kein output_text vorhanden ist
+                try:
+                    text = "".join(
+                        "".join(part.get("text", "") for part in item.get("content", []))  # type: ignore
+                        if isinstance(item, dict) else ""
+                        for item in getattr(resp, "output", [])
+                    )
+                except Exception:
+                    text = ""
+
+            try:
+                return json.loads(text) if text else {}
+            except Exception:
+                # notfalls leeres Ergebnis -> Fallback greift
+                return {}
+        except Exception as exc:  # pragma: no cover - defensive logging
+            last_error = exc
+            print(
+                f"OpenAI call attempt {attempt}/{max_retries} failed: {exc}",
+                file=sys.stderr,
+            )
+            if attempt < max_retries:
+                sleep_seconds = min(2 ** (attempt - 1), 5)
+                time.sleep(sleep_seconds)
+
+    if last_error:
+        raise last_error
+    return {}
 
 
 def apply_plan(plan: dict) -> None:
