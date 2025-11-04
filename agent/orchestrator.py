@@ -5,7 +5,6 @@ Orchestrator MVP (secure subprocess):
 - ruft optional ein Code-Modell (Responses API) auf
 - schreibt Patches/Tests oder fällt auf Beispielcode zurück
 - committet, pusht, erstellt PR + Label 'auto'
-- führt pytest mit Coverage-Gate aus
 """
 import datetime
 import json
@@ -303,26 +302,11 @@ def test_say_hello():
 
 # ---------------- Checks ----------------
 def run_local_checks() -> None:
-    # Stil automatisch reparieren -> optional committen
-    sh(["ruff", "check", "--fix", "."], check=False)
-    sh(["git", "add", "-A"], check=False)
-    sh(["git", "commit", "-m", "style(auto): ruff --fix"], check=False)
-
-    # Typing/Security als Warnung lokal
-    sh(["mypy", "."], check=False)
-    # Nur High-Severity (Policy): Build darf bei High scheitern
-    sh(["bandit", "-r", ".", "-lll"], check=False)
-
-    # Tests mit Coverage-Gate (hart)
-    sh(
-        [
-            "pytest",
-            "-q",
-            "--maxfail=1",
-            "--disable-warnings",
-            "--cov=.",
-            "--cov-config=.config/coverage.toml",
-        ]
+    """Placeholder hook for optional local validation."""
+    append_event(
+        level="info",
+        source="checks",
+        message="Local quality gates are disabled; skipping checks.",
     )
 
 

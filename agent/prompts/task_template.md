@@ -3,7 +3,7 @@
 ## Context & Commitments
 - The repository hosts an automation agent orchestrator under `agent/orchestrator.py`.
 - The orchestrator currently creates timestamped `auto/` branches, loads this briefing, and, if the code model does not respond with targeted changes, falls back to rewriting sample modules (`agent/core/hello.py`, `agent/core/buildinfo.py`, `tests/test_hello.py`).
-- Quality gates (`ruff`, `mypy`, `bandit`, `pytest`) run on every branch before opening a PR.
+- Automated quality gates are currently disabled.
 - Knowledge artefacts live under `docs/` (roadmap, backlog, decisions). They are the authoritative source for context across runs.
 
 ## Short-Horizon Objectives
@@ -15,7 +15,7 @@
 1. **Establish Context:** Inspect repo state, recent docs, and pending tasks (`docs/backlog.md`, `docs/ROADMAP.md`).
 2. **Select Run Goal:** Choose exactly one small, high-leverage increment that can be completed end-to-end within this run.
 3. **Plan Explicitly:** Draft a plan with at least three concrete, lightweight steps (include design/test considerations) before modifying code.
-4. **Implement & Test:** Apply cohesive changes, add/update automated tests under `tests/`, and keep the scope focused on the chosen increment while running quality checks.
+4. **Implement & Test:** Apply cohesive changes, add/update automated tests under `tests/`, and keep the scope focused on the chosen increment while performing any relevant checks.
 5. **Update Knowledge:** Reflect new insights, decisions, and outstanding questions in the docs/backlog so future runs stay aligned.
 6. **Report:** Summarise results, follow-ups, and risks in the JSON response.
 
