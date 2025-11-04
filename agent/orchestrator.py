@@ -13,11 +13,13 @@ import os
 import pathlib
 import subprocess
 import sys
-from typing import Optional, List
+from typing import List, Optional
 
 from openai import OpenAI
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+AUTO_BRANCH_PREFIX = "auto/"
+AUTO_LABEL = "auto"
 
 
 # ---------------- Shell helper (ohne shell=True) ----------------
@@ -48,7 +50,7 @@ def ensure_git_identity() -> None:
 
 def create_branch() -> str:
     ts = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    branch = f"auto/{ts}"
+    branch = f"{AUTO_BRANCH_PREFIX}{ts}"
     sh(["git", "checkout", "-b", branch])
     return branch
 
@@ -194,10 +196,36 @@ def gh_api(method: str, path: str, data: Optional[dict] = None) -> dict:
 
 
 def ensure_label_auto() -> None:
-    gh_api("POST", "/labels", {"name": "auto", "color": "0E8A16", "description": "Auto-merge on green checks"})
+    gh_api(
+        "POST",
+        "/labels",
+        {
+            "name": AUTO_LABEL,
+            "color": "0E8A16",
+            "description": "Auto-merge on green checks",
+        },
+    )
+
+
+def ensure_auto_branch(branch: str) -> None:
+    if not branch.startswith(AUTO_BRANCH_PREFIX):
+        raise ValueError(
+            "Auto-Merge benötigt Branches mit Präfix 'auto/'."
+            " Bitte Skript nicht auf manuelle Branches anwenden."
+        )
+
+
+def apply_auto_label(pr_number: int) -> None:
+    ensure_label_auto()
+    gh_api("POST", f"/issues/{pr_number}/labels", {"labels": [AUTO_LABEL]})
 
 
 def create_pull_request(branch: str) -> Optional[int]:
+    try:
+        ensure_auto_branch(branch)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return None
     repo_info = gh_api("GET", "")
     base = repo_info.get("default_branch", "main") if repo_info else "main"
     pr = gh_api(
@@ -214,8 +242,7 @@ def create_pull_request(branch: str) -> Optional[int]:
     )
     number = pr.get("number") if isinstance(pr, dict) else None
     if number:
-        ensure_label_auto()
-        gh_api("POST", f"/issues/{number}/labels", {"labels": ["auto"]})
+        apply_auto_label(number)
         print(f"PR erstellt: #{number}")
         return number
     print("PR konnte nicht erstellt werden (fehlende Token/Permissions?).", file=sys.stderr)
