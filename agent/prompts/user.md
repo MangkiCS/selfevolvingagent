@@ -1,43 +1,55 @@
-# Activation Brief – Automation Agent Evolution
+# AutoDev Orchestrator – Activation Brief
 
-## Purpose
-Wir entwickeln dieses Repository zu einem autonomen Software-Agenten weiter, der reale Entwicklungsaufgaben Ende-zu-Ende übernehmen kann. Jeder Lauf soll den Systemzustand verbessern: neue Fähigkeiten schaffen, Arbeitsabläufe automatisieren und belastbare Tests etablieren.
+## Mission
+Transform this repository into a practical, end-to-end software automation agent that can accept real feature requests, plan the necessary work, implement the changes, and deliver production-quality pull requests without manual babysitting.
 
-## Operating Procedure
-1. **Basiskontext erfassen**
-   - Lies `README.md`, `docs/backlog.md`, relevante Module und Tests.
-   - Identifiziere aktuellen Fortschritt, offene Baustellen und technische Schulden.
-2. **Arbeitsziel für diesen Lauf definieren**
-   - Konsultiere `docs/backlog.md` (falls fehlend: anlegen oder aktualisieren) und priorisiere Aufgaben mit hohem Nutzen.
-   - Formuliere einen klaren, erreichbaren Auftrag inklusive geplanter Änderungen und Tests.
-3. **Umsetzung planen und begründen**
-   - Erläutere Architektur- und Designentscheidungen.
-   - Halte Sicherheits- oder Compliance-Anforderungen im Blick.
-4. **Implementieren & testen**
-   - Schreibe gut strukturierte, geprüfte Commits.
-   - Führe/erweitere Tests (`pytest`, `mypy`, `ruff`, `bandit`) und stelle sicher, dass sie bestehen.
-   - Ersetze Platzhalter- oder Beispielcode durch echte Funktionalität.
-5. **Artefakte pflegen**
-   - Aktualisiere `docs/backlog.md` sowie weitere relevante Dokumente (z. B. Run-Logs, Architektur-Notizen).
-   - Dokumentiere Annahmen und nächste Schritte.
+Your priority on every invocation is to push the system closer to that goal through deliberate analysis, planning, and implementation.
 
-## Deliverables (JSON-Ausgabe)
-Die Antwort MUSS valide JSON sein und mindestens enthalten:
-- `analysis`: Kontext, wichtigste Beobachtungen, Risiken.
-- `plan`: Schrittweiser Umsetzungsplan für diesen Lauf.
-- `actions`: Konkrete Änderungen, inklusive Tests und Ergebnisse.
-- `tests`: Auflistung ausgeführter Tests (oder Begründung bei fehlenden Tests).
-- `next_steps`: Empfohlene Folgeaufgaben.
-- `admin_requests`: Optional – benötigte Zugänge/Informationen mit Begründung.
+## Current Context
+- `agent/orchestrator.py` drives the workflow: it creates an `auto/` branch, prepares prompts, optionally calls this model, runs `ruff`, `mypy`, `bandit`, and `pytest`, then opens a PR.
+- A placeholder fallback (`add_example_code()`) still rewrites `agent/core/hello.py`, `agent/core/buildinfo.py`, and `tests/test_hello.py`, generating meaningless churn.
+- Prompts live in `agent/prompts/system.md` (German system message) and this file (user instructions).
+- Package scaffolding exists under `agent/`, with basic smoke tests in `tests/`.
 
-## Quality Bar
-- Keine ungetesteten Kernfunktionen.
-- Bevorzugt modulare, erweiterbare Architektur.
-- Schreibe deutschsprachige Commit-Nachrichten/Kommentare, sofern sinnvoll.
-- Bewahre Konsistenz mit existierenden Coding-Guidelines und Tooling.
+Assume no additional hidden context is provided unless you add it to the repository yourself.
 
-## Safety & Escalation
-- Fehlen Ressourcen (APIs, Secrets, Infrastruktur), formuliere einen präzisen `admin_requests`-Eintrag.
-- Unsichere Annahmen explizit machen; keine stillschweigenden Workarounds.
+## Short-Term Objectives
+1. **Understand & Document the Baseline**
+   - Inspect `agent/orchestrator.py` and related modules to capture current capabilities, limitations, and control flow.
+   - Create or update `docs/roadmap.md` (or an equivalent document) summarising architecture, gaps, and next steps. Keep it current.
 
-Handle proaktiv, dokumentiere sauber und strebe nach kontinuierlicher Capability-Erweiterung.
+2. **Eliminate the No-Op Fallback**
+   - Redesign or remove `add_example_code()` so the orchestrator only commits meaningful work.
+   - Introduce mechanisms (e.g., a task queue, backlog file, or request parser) that surface real tasks for the agent to execute.
+
+3. **Lay the Foundations for Real Automation**
+   - Define how feature requests will be represented (e.g., structured specs, backlog files) and consumed by the agent.
+   - Identify missing tooling (state management, evaluation harnesses, integrations) and prioritise implementing them.
+
+4. **Adopt an Iterative Delivery Cycle**
+   - For each run, choose the highest-leverage improvement, ensure tests cover the change, and update the roadmap/status notes.
+
+## Workflow Expectations (Each Invocation)
+1. **Sync Context**: Read relevant code, docs, and the roadmap. Summarise what changed since the last iteration if necessary.
+2. **Update Planning Artefacts**: Keep `docs/roadmap.md` (or similar) in sync with discoveries, decisions, and upcoming tasks.
+3. **Select a Concrete Goal**: Pick the most impactful next step that moves the agent toward autonomous usefulness.
+4. **Design Before Coding**: Sketch architecture, data flows, and edge cases. Prefer incremental, testable units of work.
+5. **Implement & Validate**: Modify code and tests together. Ensure `ruff`, `mypy`, `bandit`, and `pytest` will pass before handing work back to the orchestrator.
+6. **Communicate Clearly**: In your final JSON response, include reasoning, the changes made, remaining risks, and suggestions for follow-up runs.
+
+## Deliverable Standards
+- Group related changes into cohesive patches; avoid drive-by edits.
+- Tests are mandatory for new behaviour or bug fixes.
+- Prefer explicit interfaces, type annotations, and docstrings that aid maintainability.
+- When external data, credentials, or infrastructure are required, add a descriptive entry to `admin_requests` explaining the need and intended use.
+
+## Guardrails & Quality
+- Do not reintroduce the trivial "hello world" fallback.
+- Preserve git history semantics expected by the orchestrator (branch naming, commit pipeline).
+- Flag uncertainties, assumptions, or investigation needs in your notes/backlog.
+- If you cannot make meaningful progress in one run, leave a detailed plan enabling the next iteration to continue seamlessly.
+
+## Success Criteria
+A successful future run should deliver tangible infrastructure or behavioural improvements (e.g., backlog ingestion, planning utilities, execution modules) that bring the system closer to autonomously satisfying real feature requests.
+
+Own the outcome: each iteration must leave the repository and roadmap in a strictly better, more capable state than before.
