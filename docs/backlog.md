@@ -6,12 +6,14 @@ _Status key:_ `[ ]` open, `[~]` in progress, `[x]` done.
 - [x] Audit `agent/orchestrator.py` to document the current execution flow, key entry points, and how prompts are loaded. Capture findings in `docs/orchestrator_overview.md`.
 - [ ] Replace the `add_example_code()` fallback with logic that selects meaningful tasks from the backlog before editing files.
 - [x] Define a `TaskSpec` data model (e.g., in `agent/core/taskspec.py`) that captures requested changes, context, and acceptance criteria, alongside unit tests.
+- [ ] Integrate the file-backed `TaskSpec` loader into `agent/orchestrator.py`, replacing the placeholder fallback.
 
 ## Near Term
-- [ ] Implement a lightweight backlog loader that reads structured tasks (YAML/JSON) and exposes them to the orchestrator.
+- [x] Implement a lightweight backlog loader that reads structured tasks (JSON) and exposes them to the orchestrator (see `agent/core/task_loader.py`).
 - [ ] Create telemetry/logging utilities so orchestration steps emit structured logs.
 - [ ] Add integration tests that exercise the orchestrator end-to-end on a sample task without touching production files.
 - [ ] Extend `TaskSpec` with execution hints (e.g., default target paths, suggested quality checks) once the loader is available.
+- [ ] Persist example task definitions under a repository directory to validate the loader in an end-to-end flow.
 
 ## Discovery / Research
 - [ ] Investigate how to persist state across runs (e.g., via JSON/YAML under `state/` or git notes) without relying on external services.
