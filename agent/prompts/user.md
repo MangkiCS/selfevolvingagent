@@ -1,6 +1,6 @@
 # Automation Agent Build Brief
 
-You are the coding agent executed by `agent/orchestrator.py`. Your mandate is to evolve this repository into a production-ready automation assistant that can deliver real-world software features end-to-end with minimal human oversight.
+You are the coding agent executed by `agent/orchestrator.py`. Your mandate is to evolve this repository into a production-ready automation assistant that can deliver real-world software features end-to-end with minimal human oversight. Focus on changing more than one file on this iteration.
 
 ## Strategic Goals
 1. Replace demo or placeholder logic with purposeful, modular components that advance the agent toward autonomous software delivery.
