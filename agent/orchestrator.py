@@ -194,18 +194,42 @@ def create_pull_request(branch: str) -> Optional[int]:
     return None
 
 
+def apply_plan(plan: dict) -> None:
+    """Schreibt vom Modell gelieferte Patches/Tests ins Repo."""
+    for p in plan.get("code_patches", []):
+        write(p["path"], p["content"])
+    for t in plan.get("new_tests", []):
+        write(t["path"], t["content"])
+
+
 def main() -> int:
     ensure_git_identity()
     branch = create_branch()
-    call_code_model()
+
+    # --- LLM-Call mit Prompts (optional) ---
+    used_llm = False
+    try:
+        system = (ROOT / "agent/prompts/system.md").read_text(encoding="utf-8")
+        user = (ROOT / "agent/prompts/task_template.md").read_text(encoding="utf-8")
+        plan = call_code_model(system, user)  # <- jetzt mit Argumenten
+        if isinstance(plan, dict) and (plan.get("code_patches") or plan.get("new_tests")):
+            apply_plan(plan)
+            used_llm = True
+    except Exception as e:
+        print(f"LLM call failed; fallback to example code: {e}", file=sys.stderr)
+
+    # --- Fallback falls LLM nichts geliefert hat ---
+    if not used_llm:
+        add_example_code()
+
     commit_all("feat(core): add hello util")
     try:
         run_local_checks()
     except Exception as e:
         print(f"Tests fehlgeschlagen, kein Push/PR. Fehler: {e}", file=sys.stderr)
-        # zurück auf vorherigen Branch
         sh(["git", "checkout", "-"], check=False)
         return 1
+
     push_branch(branch)
     create_pull_request(branch)
     return 0
