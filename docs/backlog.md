@@ -1,25 +1,25 @@
 # Automation Agent Backlog
 
-## Kontext
-Das Repository besitzt derzeit eine MVP-Orchestrierung mit Platzhalter-Fallback-Code. Ziel ist der Aufbau eines autonomen Entwicklungsagenten, der reale Feature-Anfragen verstehen, umsetzen, testen und ausliefern kann.
+_Status key:_ `[ ]` open, `[~]` in progress, `[x]` done.
 
-## Unmittelbare Aufgaben (0-1 Iterationen)
-1. **Fallback ersetzen** – `agent/orchestrator.py:add_example_code` soll ein sinnvolles Artefakt (z. B. Run-Log) erzeugen statt Demo-Code zu überschreiben.
-2. **Run-Logging etablieren** – Persistente Protokollierung jedes Agentenlaufs (Zeitstempel, Branch, Kurzbeschreibung der Aktionen).
-3. **Prompt-Alignment prüfen** – Sicherstellen, dass System- und User-Prompts konsistent sind und auf die neuen Ziele einzahlen.
+## Ready Next (High Priority)
+- [ ] Audit `agent/orchestrator.py` to document the current execution flow, key entry points, and how prompts are loaded. Capture findings in `docs/orchestrator_overview.md`.
+- [ ] Replace the `add_example_code()` fallback with logic that selects meaningful tasks from the backlog before editing files.
+- [ ] Define a `TaskSpec` data model (e.g., in `agent/core/taskspec.py`) that captures requested changes, context, and acceptance criteria, alongside unit tests.
 
-## Kurzfristige Ziele (1-3 Iterationen)
-- **Task Intake Pipeline**: Mechanismus entwerfen, um externe Anforderungen (Datei, Issue, API) einzulesen und in umsetzbare Arbeitspakete zu überführen.
-- **Kontextmodellierung**: Werkzeuge bereitstellen, die Codebasis (Module, Tests, Abhängigkeiten) automatisiert zu kartieren.
-- **Qualitätssicherung ausbauen**: Zusätzliche Checks (Coverage, statische Analysen) integrieren und automatisieren.
+## Near Term
+- [ ] Implement a lightweight backlog loader that reads structured tasks (YAML/JSON) and exposes them to the orchestrator.
+- [ ] Create telemetry/logging utilities so orchestration steps emit structured logs.
+- [ ] Add integration tests that exercise the orchestrator end-to-end on a sample task without touching production files.
 
-## Mittelfristige Perspektiven (>3 Iterationen)
-- **Integrationen**: Anbindung an externe Systeme (z. B. GitHub, Ticketing, Deployment) vorbereiten.
-- **Planungs- und Review-Automatisierung**: Automatisches Erstellen von Design-Dokumenten, PR-Beschreibungen und Reviews.
-- **Self-Healing**: Mechanismen, um fehlgeschlagene Läufe zu analysieren und Maßnahmen abzuleiten.
+## Discovery / Research
+- [ ] Investigate how to persist state across runs (e.g., via JSON/YAML under `state/` or git notes) without relying on external services.
+- [ ] Explore requirements for integrating with external issue trackers or PR platforms; identify data the orchestrator must accept.
+- [ ] Determine minimal credential and configuration needs for interacting with remote APIs, to request from operators later.
 
-## Offene Fragen
-- Welche externen APIs oder Zugangsdaten werden benötigt, um Aufgabenquellen anzubinden?
-- Wie soll der Agent langfristig Deployments oder Releases orchestrieren?
+## Future Opportunities
+- [ ] Build a planning module that decomposes large tasks into ordered steps and tracks completion status.
+- [ ] Introduce policy checks (security, license scanning) as part of the quality gate.
+- [ ] Design a plugin system for domain-specific automation skills.
 
-> Aktualisiere diesen Backlog nach jeder Iteration: erledigte Punkte abhaken, neue Erkenntnisse ergänzen, Prioritäten justieren.
+_Update this backlog every run: promote completed items, add discoveries, and re-prioritise as the agent evolves._
