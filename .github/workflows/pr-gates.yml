@@ -85,10 +85,10 @@ jobs:
         run: |
           set -e
           # 1. Versuch
-          if gh pr merge ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --squash --delete-branch; then
+          if gh pr merge ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --squash --delete-branch --yes; then
             exit 0
           fi
           echo "First merge attempt failed; waiting 10s and retrying..."
           sleep 10
           # 2. Versuch
-          gh pr merge ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --squash --delete-branch
+          gh pr merge ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --squash --delete-branch --yes
