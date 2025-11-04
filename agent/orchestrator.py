@@ -18,6 +18,8 @@ from typing import Iterable, List, Optional
 
 from openai import OpenAI
 
+from agent.core.event_log import append_event
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 AUTO_BRANCH_PREFIX = "auto/"
 AUTO_LABEL = "auto"
@@ -41,8 +43,22 @@ def sh(args: List[str], check: bool = True, cwd: pathlib.Path = ROOT) -> str:
         print(res.stdout)
     if res.stderr:
         print(res.stderr, file=sys.stderr)
-    if check and res.returncode != 0:
-        raise RuntimeError(f"Command failed: {' '.join(args)}")
+    if res.returncode != 0:
+        level = "error" if check else "warning"
+        stdout = res.stdout[-1000:] if res.stdout else ""
+        stderr = res.stderr[-1000:] if res.stderr else ""
+        append_event(
+            level=level,
+            source="subprocess",
+            message=f"Command failed: {' '.join(args)}",
+            details={
+                "returncode": res.returncode,
+                "stdout": stdout,
+                "stderr": stderr,
+            },
+        )
+        if check:
+            raise RuntimeError(f"Command failed: {' '.join(args)}")
     return res.stdout.strip()
 
 
@@ -331,6 +347,12 @@ def gh_api(method: str, path: str, data: Optional[dict] = None) -> dict:
         with urllib.request.urlopen(req, body) as resp:
             return json.loads(resp.read().decode())
     except Exception as e:
+        append_event(
+            level="error",
+            source="github_api",
+            message="GitHub API request failed",
+            details={"method": method, "path": path, "error": str(e)},
+        )
         print(f"GitHub API error: {e}", file=sys.stderr)
         return {}
 
@@ -411,6 +433,12 @@ def main() -> int:
             apply_plan(plan)
             used_llm = True
     except Exception as e:
+        append_event(
+            level="error",
+            source="orchestrator",
+            message="LLM call failed",
+            details={"error": str(e)},
+        )
         print(f"LLM call failed; fallback to example code: {e}", file=sys.stderr)
 
     if not used_llm:
@@ -420,6 +448,12 @@ def main() -> int:
     try:
         run_local_checks()
     except Exception as e:
+        append_event(
+            level="error",
+            source="orchestrator",
+            message="Quality checks failed",
+            details={"error": str(e)},
+        )
         print(f"Tests fehlgeschlagen, kein Push/PR. Fehler: {e}", file=sys.stderr)
         sh(["git", "checkout", "-"], check=False)
         return 1
