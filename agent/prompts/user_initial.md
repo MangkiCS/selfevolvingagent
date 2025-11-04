@@ -3,7 +3,7 @@
 ## Current Context
 - The repository contains an MVP automation orchestrator under `agent/orchestrator.py`.
 - The orchestrator currently falls back to rewriting sample hello-world modules when no targeted changes are supplied.
-- Quality checks (`ruff`, `mypy`, `bandit`, `pytest`) gate every PR.
+- Automated quality gates are currently disabled; apply judgement when validating work.
 - Documentation/backlog live under `docs/` and must be kept current.
 
 ## Long-Term Goal

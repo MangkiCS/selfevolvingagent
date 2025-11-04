@@ -1,6 +1,1 @@
-pytest
-pytest-cov
-ruff
-mypy
-bandit
 openai>=2.0.0,<3

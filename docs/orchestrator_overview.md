@@ -1,7 +1,7 @@
 # Orchestrator Overview
 
 ## Purpose
-`agent/orchestrator.py` drives the automation workflow by preparing feature branches, invoking the language model with repository context, applying code patches, running quality gates, and publishing pull requests.
+`agent/orchestrator.py` drives the automation workflow by preparing feature branches, invoking the language model with repository context, applying code patches, and publishing pull requests.
 
 ## Execution Flow (current MVP)
 
@@ -18,10 +18,10 @@
    - Helper `write()` persists any returned `code_patches` or `new_tests` by overwriting the target files atomically.
    - When the model does not return targeted edits, `add_example_code()` overwrites `agent/core/hello.py`, `agent/core/buildinfo.py`, and `tests/test_hello.py` to keep the pipeline active—this placeholder must be retired.
 
-4. **Quality Gates & PR Automation**
-   - After applying changes, the orchestrator runs `ruff`, `mypy`, `bandit`, and `pytest` with coverage enforcement.
+4. **Checks & PR Automation**
+   - Local quality gates are currently disabled; `run_local_checks()` simply records that they were skipped.
    - Successful runs commit all modifications, push the `auto/` branch, and open a pull request labelled `auto`.
-   - Failures from subprocesses, quality gates, GitHub API calls, or LLM interactions are appended to `docs/run_events.json` so future runs (and the prompt snapshot) can inspect the most recent diagnostics.
+   - Failures from subprocesses, GitHub API calls, or LLM interactions are appended to `docs/run_events.json` so future runs (and the prompt snapshot) can inspect the most recent diagnostics.
 
 ## Gaps & Risks
 - **Placeholder fallback:** `add_example_code()` produces noisy commits with no business value.

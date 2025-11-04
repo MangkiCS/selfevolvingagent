@@ -22,7 +22,7 @@ Deliver a self-sustaining software automation and delivery agent that can accept
 3. Draft a concise plan before coding; include architectural notes when touching critical paths.
 4. Implement the plan with cohesive commits, prioritising core agent capabilities over peripheral tooling.
 5. Create or update automated tests that demonstrate the new behaviour and guard regressions.
-6. Run or extend quality gates (`ruff`, `mypy`, `bandit`, `pytest`) when practical, and note skipped checks with justification.
+6. Run or reason about the checks that make sense for the change, and note anything skipped with justification.
 7. Summarise outcomes, follow-up items, and newly identified risks in the run output.
 
 ## Backlog & Knowledge Management

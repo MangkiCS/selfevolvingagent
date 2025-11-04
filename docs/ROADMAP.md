@@ -17,14 +17,14 @@ Provide a living backlog that guides the transformation from the current MVP int
 ## Phase 2 – Execution Capabilities
 - Build core automation primitives (code editing, diff planning, test running, reporting).
 - Implement robust error handling, retries, and logging.
-- Ensure security checks (bandit, dependencies) surface actionable feedback.
+- Ensure security checks surface actionable feedback.
 
 ## Phase 3 – External Integrations
 - Connect to real task sources (ticketing systems, Git providers) once credentials and APIs are available.
 - Add notification/approval workflows as required by operators.
 
 ## Ongoing Engineering Practices
-- Maintain high test coverage and static analysis hygiene (ruff, mypy, bandit, pytest).
+- Maintain high test coverage and static analysis hygiene appropriate for the stack.
 - Record significant design choices in decision logs.
 - Keep documentation current with each iteration.
 

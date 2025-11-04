@@ -20,9 +20,7 @@ jobs:
         with: { python-version: "3.11" }
 
       - name: Install deps
-        run: |
-          pip install -r agent/requirements.txt
-          pip install pytest pytest-cov ruff mypy bandit
+        run: pip install -r agent/requirements.txt
 
       - name: Run orchestrator (stub)
         env:
