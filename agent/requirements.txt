@@ -3,3 +3,4 @@ pytest-cov
 ruff
 mypy
 bandit
+openai>=1.0.0
