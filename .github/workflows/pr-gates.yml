@@ -2,8 +2,6 @@ name: pr-gates
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
-  pull_request_target:
-    types: [opened, synchronize, reopened, labeled]
 
 # Wichtig: globale Write-Rechte, sonst darf der Merge-Job nicht mergen
 permissions:
