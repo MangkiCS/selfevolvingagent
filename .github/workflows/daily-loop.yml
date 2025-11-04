@@ -29,5 +29,6 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # <— neu: Token für die GitHub API
           GITHUB_REPOSITORY: ${{ github.repository }} # <— optional, zur Sicherheit
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           python agent/orchestrator.py --mode daily || python agent/orchestrator.py
