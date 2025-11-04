@@ -56,6 +56,16 @@
 - Use `TaskSpec.to_dict()` to serialise instances for storage, logging, or model prompts.
 - The backlog loader (see `docs/backlog.md`) should emit sequences of `TaskSpec` objects so downstream orchestration logic can reason about priorities and dependencies.
 
+## Loading Task Specifications
+
+Task definitions can be persisted as `.json` files inside a dedicated directory (e.g., `tasks/`). The helper `agent.core.task_loader.load_task_specs()` scans the directory recursively, ignoring hidden files and directories, and accepts three JSON layouts:
+
+1. A single task object per file.
+2. An array of task objects.
+3. An object containing a top-level `tasks` array.
+
+Each entry is validated via `TaskSpec.from_dict()`, and duplicate `task_id` values are rejected with a `TaskSpecLoadingError` that points to the conflicting file. This loader forms the foundation for replacing the orchestrator's placeholder fallback with backlog-driven execution.
+
 ## Follow-Up
 
 - Extend the schema with execution hints (e.g., default target paths or suggested quality gates) as the backlog loader evolves.
