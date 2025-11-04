@@ -14,7 +14,7 @@ import pathlib
 import subprocess
 import sys
 import time
-from typing import List, Optional
+from typing import Iterable, List, Optional
 
 from openai import OpenAI
 
@@ -120,8 +120,61 @@ def build_repo_snapshot(
 
 
 # ---------------- OpenAI (Responses API) ----------------
-DEFAULT_API_TIMEOUT = float(os.environ.get("OPENAI_API_TIMEOUT", "60"))
-DEFAULT_API_MAX_RETRIES = int(os.environ.get("OPENAI_API_MAX_RETRIES", "2"))
+DEFAULT_API_TIMEOUT = 180.0
+DEFAULT_API_MAX_RETRIES = 2
+DEFAULT_API_POLL_INTERVAL = 1.5
+DEFAULT_API_REQUEST_TIMEOUT = 30.0
+
+
+def _env_float(name: str, default: float) -> float:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _extract_response_text(parts: Optional[Iterable[object]]) -> str:
+    if not parts:
+        return ""
+    chunks: List[str] = []
+    for item in parts:
+        if isinstance(item, dict):
+            item_type = item.get("type")
+            content = item.get("content")
+        else:
+            item_type = getattr(item, "type", None)
+            content = getattr(item, "content", None)
+        if item_type == "message":
+            if not content:
+                continue
+            for segment in content:
+                if isinstance(segment, dict):
+                    segment_type = segment.get("type")
+                    text = segment.get("text", "")
+                else:
+                    segment_type = getattr(segment, "type", None)
+                    text = getattr(segment, "text", "")
+                if segment_type == "output_text":
+                    if text:
+                        chunks.append(text)
+        elif item_type == "output_text":  # defensive: flattened content
+            text = item.get("text", "") if isinstance(item, dict) else getattr(item, "text", "")
+            if text:
+                chunks.append(text)
+    return "".join(chunks)
 
 
 def call_code_model(system: str, user: str) -> dict:
@@ -130,41 +183,57 @@ def call_code_model(system: str, user: str) -> dict:
     Ohne `response_format` (kompatibel mit aktuellen SDKs); wir parsen JSON aus output_text.
     """
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-    timeout = float(os.environ.get("OPENAI_API_TIMEOUT", DEFAULT_API_TIMEOUT))
-    max_retries = int(os.environ.get("OPENAI_API_MAX_RETRIES", DEFAULT_API_MAX_RETRIES))
+    timeout = _env_float("OPENAI_API_TIMEOUT", DEFAULT_API_TIMEOUT)
+    max_retries = _env_int("OPENAI_API_MAX_RETRIES", DEFAULT_API_MAX_RETRIES)
+    poll_interval = max(0.2, _env_float("OPENAI_API_POLL_INTERVAL", DEFAULT_API_POLL_INTERVAL))
+    request_timeout = max(1.0, _env_float("OPENAI_API_REQUEST_TIMEOUT", DEFAULT_API_REQUEST_TIMEOUT))
     if max_retries < 1:
         max_retries = 1
 
     last_error: Optional[Exception] = None
     for attempt in range(1, max_retries + 1):
         try:
-            resp = client.responses.create(
+            deadline = time.monotonic() + timeout
+            response = client.responses.create(
                 model="gpt-5-codex",
                 input=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
                 ],
-                # response_format weggelassen -> per Prompt striktes JSON verlangen
-                timeout=timeout,
+                background=True,
+                timeout=min(request_timeout, timeout),
             )
 
-            text = getattr(resp, "output_text", None)
-            if not text:
-                # Fallback: zusammensetzen, falls kein output_text vorhanden ist
-                try:
-                    text = "".join(
-                        "".join(part.get("text", "") for part in item.get("content", []))  # type: ignore
-                        if isinstance(item, dict) else ""
-                        for item in getattr(resp, "output", [])
-                    )
-                except Exception:
-                    text = ""
+            response_id = getattr(response, "id", None)
+            status = getattr(response, "status", None)
+            while status in (None, "queued", "in_progress"):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("LLM call exceeded configured timeout")
+                time.sleep(min(poll_interval, remaining))
+                if not response_id:
+                    break
+                response = client.responses.retrieve(
+                    response_id,
+                    timeout=min(request_timeout, max(remaining, 0.1)),
+                )
+                status = getattr(response, "status", None)
 
-            try:
-                return json.loads(text) if text else {}
-            except Exception:
-                # notfalls leeres Ergebnis -> Fallback greift
-                return {}
+            if status == "completed":
+                text = getattr(response, "output_text", None)
+                if not text:
+                    text = _extract_response_text(getattr(response, "output", None))
+                try:
+                    return json.loads(text) if text else {}
+                except Exception:
+                    return {}
+
+            if status == "failed" and getattr(response, "error", None):
+                err = getattr(response, "error")
+                message = getattr(err, "message", repr(err))
+                raise RuntimeError(f"Model response failed: {message}")
+
+            raise RuntimeError(f"Model response did not complete (status={status})")
         except Exception as exc:  # pragma: no cover - defensive logging
             last_error = exc
             print(
