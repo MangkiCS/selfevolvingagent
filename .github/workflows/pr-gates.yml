@@ -1,6 +1,6 @@
 name: pr-gates
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize, reopened, labeled]
 
 # Wichtig: globale Write-Rechte, sonst darf der Merge-Job nicht mergen
@@ -8,6 +8,7 @@ permissions:
   contents: write
   pull-requests: write
   checks: read
+  statuses: write
 
 jobs:
   quality:
@@ -39,4 +40,26 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: pytest -q --maxfail=1 --disable-warnings --cov=. --cov-config=.config/coverage.toml
+
+      - name: Report required status
+        if: ${{ always() && github.event_name == 'pull_request' }}
+        uses: actions/github-script@v7
+        env:
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            const state = process.env.JOB_STATUS === 'success' ? 'success' : 'failure';
+            const sha = context.payload.pull_request?.head?.sha ?? context.sha;
+
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha,
+              state,
+              context: 'pr-gates / quality',
+              description: state === 'success'
+                ? 'pr-gates quality checks passed'
+                : 'pr-gates quality checks failed',
+              target_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`
+            });
 
