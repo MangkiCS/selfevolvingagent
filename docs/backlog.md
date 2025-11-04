@@ -13,7 +13,8 @@ _Status key:_ `[ ]` open, `[~]` in progress, `[x]` done.
 - [ ] Create telemetry/logging utilities so orchestration steps emit structured logs.
 - [ ] Add integration tests that exercise the orchestrator end-to-end on a sample task without touching production files.
 - [ ] Extend `TaskSpec` with execution hints (e.g., default target paths, suggested quality checks) once the loader is available.
-- [ ] Persist example task definitions under a repository directory to validate the loader in an end-to-end flow.
+- [x] Persist example task definitions under a repository directory to validate the loader in an end-to-end flow.
+  - Sample catalogue maintained at `tasks/active.json`; keep it aligned with the high-priority backlog.
 
 ## Discovery / Research
 - [ ] Investigate how to persist state across runs (e.g., via JSON/YAML under `state/` or git notes) without relying on external services.
