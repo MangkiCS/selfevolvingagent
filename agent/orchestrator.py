@@ -13,6 +13,7 @@ import pathlib
 import subprocess
 import sys
 from typing import Optional
+from openai import OpenAI
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -54,6 +55,25 @@ def create_branch() -> str:
     branch = f"auto/{ts}"
     sh(["git", "checkout", "-b", branch])
     return branch
+
+def call_code_model(system: str, user: str):
+    """
+    Ruft GPT-5-Codex über die Responses API auf und erwartet strikt JSON.
+    Setze OPENAI_API_KEY als Secret in GitHub (Settings → Secrets → Actions).
+    """
+    client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    resp = client.responses.create(
+        model="gpt-5-codex",
+        input=[
+            {"role": "system", "content": system},
+            {"role": "user",   "content": user}
+        ],
+        temperature=0.2,
+        response_format={"type": "json_object"},  # zwingt valides JSON
+    )
+    # Je nach SDK-Version:
+    raw = getattr(resp, "output_text", None) or resp.output[0].content[0].text
+    return json.loads(raw)
 
 
 def add_example_code() -> None:
@@ -177,7 +197,7 @@ def create_pull_request(branch: str) -> Optional[int]:
 def main() -> int:
     ensure_git_identity()
     branch = create_branch()
-    add_example_code()
+    call_code_model()
     commit_all("feat(core): add hello util")
     try:
         run_local_checks()
