@@ -3,9 +3,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
 
+# Wichtig: globale Write-Rechte, sonst darf der Merge-Job nicht mergen
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
+  checks: read
 
 jobs:
   quality:
@@ -50,8 +52,43 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - name: Merge PR (squash & delete branch)
+      - name: Debug PR context (optional)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          echo "PR #${{ github.event.pull_request.number }} on ${{ github.repository }}"
+          gh pr view ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --json state,isDraft,mergeStateStatus,labels \
+            --jq '{state,isDraft,mergeStateStatus,labels:[.labels[].name]}'
+
+      - name: Wait until PR is mergeable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Warten, bis GitHub den PR als "CLEAN/UNSTABLE/HAS_HOOKS" markiert (mergebar)
+          for i in {1..24}; do
+            STATE=$(gh pr view ${{ github.event.pull_request.number }} --repo ${{ github.repository }} \
+              --json mergeStateStatus --jq .mergeStateStatus || echo "UNKNOWN")
+            echo "mergeStateStatus=$STATE (attempt $i)"
+            case "$STATE" in
+              CLEAN|UNSTABLE|HAS_HOOKS)
+                break
+                ;;
+              *)
+                sleep 5
+                ;;
+            esac
+          done
+
+      - name: Merge PR (squash & delete branch) with retry
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          # 1. Versuch
+          if gh pr merge ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --squash --delete-branch; then
+            exit 0
+          fi
+          echo "First merge attempt failed; waiting 10s and retrying..."
+          sleep 10
+          # 2. Versuch
           gh pr merge ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --squash --delete-branch
