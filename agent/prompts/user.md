@@ -1,47 +1,59 @@
-# Activation brief for the self-evolving automation agent
+# Mission Brief: Build a Self-Sufficient Automation Agent
 
-## Strategic Mission
-Transform this repository from a placeholder orchestrator into a production-grade automation agent that can ingest real feature requests, plan implementation work, deliver code, and validate the results end-to-end.
+## Repository Snapshot
+- `agent/orchestrator.py` orchestrates each run, creates timestamped `auto/` branches, and currently falls back to rewriting toy modules before committing, running `ruff`, `mypy`, `bandit`, and `pytest`, then opening a PR.
+- `agent/core/hello.py`, `agent/core/buildinfo.py`, and `tests/test_hello.py` are overwritten by the fallback logic and provide no lasting value.
+- Prompts live in `agent/prompts/system.md` (German system message) and this file (user brief). No other context is injected automatically.
+- The package structure under `agent/` plus smoke tests under `tests/` form the current scaffold.
 
-## Known Starting Context
-- Entry point: `agent/orchestrator.py` creates a timestamped `auto/` branch, orchestrates calls into this prompt, runs quality gates (`ruff`, `mypy`, `bandit`, `pytest`), and opens a PR.
-- Current fallback (`add_example_code`) overwrites `agent/core/hello.py`, `agent/core/buildinfo.py`, and `tests/test_hello.py` with demo content on every run.
-- System prompt: `agent/prompts/system.md` (German). This file supplies the user prompt. No other context is injected unless you create it.
+## Strategic Objectives
+1. Replace the placeholder fallback with workflows that push the repository toward a production-ready automation agent capable of solving external software tasks end-to-end.
+2. Establish persistent planning artifacts (e.g., backlog, state files, design docs) so progress compounds across runs.
+3. Build modular capabilities for task intake, prioritisation, execution, verification, and reporting.
+4. Maintain high engineering standards: typed Python, clean architecture, comprehensive tests, documentation, and automated quality gates.
 
-## Immediate Objectives for Upcoming Runs
-1. **Baseline Analysis & Documentation**
-   - Inspect the repository structure and document the current orchestrator behavior, tooling, and limitations.
-   - Produce a concise architecture summary (consider `docs/architecture.md` or similar) and capture outstanding gaps.
-   - Verify the CI/quality checks pipeline locally (`ruff`, `mypy`, `bandit`, `pytest`) to understand constraints.
+## Default Workflow for Each Run
+1. **Assess Context**
+   - Inspect repository changes since the last run and review any planning/state artifacts.
+   - Update or create a succinct changelog or state file (e.g., `STATE.md`) summarising insights and next steps.
 
-2. **Replace the Fallback with Value-Adding Behavior**
-   - Design and implement a planning/execution workflow that interprets feature requests, generates implementation plans, updates code, and runs the quality gates.
-   - Remove or gate the demo fallback so it no longer overwrites useful work.
-   - Introduce state/configuration that allows the orchestrator to manage work units (e.g. tasks queued via files, CLI args, or issue ingestion).
+2. **Plan Deliberately**
+   - Maintain or extend a living roadmap/backlog (e.g., `docs/backlog.md`) with prioritised, actionable tasks.
+   - Select the highest-impact item that can be advanced meaningfully in the current run.
+   - Outline a step-by-step plan before touching code; ensure the plan includes testing and validation.
 
-3. **Build Core Capabilities**
-   - Add utilities for repository introspection (dependency graph, file summaries) to help future reasoning.
-   - Establish a durable memory/log of past actions (e.g. under `agent/logs/` or `docs/history/`).
-   - Create scaffold tests that exercise the new workflow end-to-end.
-   - Ensure developer ergonomics: lint config, type hints, documentation, and examples for running the agent manually.
+3. **Execute with Rigor**
+   - Write production-quality code with clear abstractions and docstrings.
+   - Introduce or update automated tests alongside new functionality.
+   - Prefer incremental, reversible changes that keep the repository in a releasable state.
+   - When refactoring, preserve behaviour and expand test coverage to lock in improvements.
 
-## Operating Guidelines for Each Iteration
-- Produce a clear plan before implementation. Explicitly call out assumptions, risks, and validation strategy.
-- Favor incremental, reversible changes with strong tests. Keep diffs focused.
-- Whenever modifying orchestration logic, update accompanying docs/tests so the new behavior is observable and verifiable.
-- Prefer Python 3.11+ standard library and existing dependencies. Seek admin support before adding external services/secrets.
-- If information, credentials, or infrastructure are missing, populate the `admin_requests` field with a concise justification.
+4. **Validate**
+   - Run the full quality suite (`ruff`, `mypy`, `bandit`, `pytest`) locally or via CI assumptions.
+   - Address all failures before finishing. If blocked, document precisely why and propose remediation.
 
-## Quality & Validation Expectations
-- Follow TDD/BDD principles where feasible: add failing tests, implement, then confirm green.
-- Ensure `ruff`, `mypy`, `bandit`, and `pytest` pass locally before concluding an iteration.
-- Document significant architectural decisions (ADR-style) when behavior or design changes meaningfully.
+5. **Record Outcomes**
+   - Update planning/state artifacts with accomplished work, outstanding issues, and recommended next steps.
+   - Summarise design decisions and testing results in commit/PR context when applicable.
 
-## Fallback & Escalation Clause
-- Do **not** rely on or reinstate the legacy "hello world" fallback. If blocked or uncertain, surface the issue via rationale and/or `admin_requests` rather than committing placeholder changes.
+## Deliverables & Conventions
+- Always provide `code_patches` with complete file contents and pair them with corresponding `new_tests` when functionality changes.
+- Ensure new features are covered by tests; prefer `pytest` style and organise fixtures/helpers for reuse.
+- Keep documentation in sync (README, `docs/`, inline docstrings, changelogs).
+- When external resources (APIs, credentials, infra) are required, add precise entries to `admin_requests` explaining the need and intended usage.
 
-## Collaboration Notes
-- Maintain a running backlog or roadmap (e.g., `docs/roadmap.md`) identifying upcoming milestones.
-- Keep PRs and commit messages informative, referencing the plan executed.
+## Immediate Priorities
+1. Design and implement a meaningful fallback/task execution pipeline that advances the roadmap instead of rewriting sample code.
+2. Introduce persistent storage for agent state, backlog, and decision logs.
+3. Harden the orchestrator: clearer logging, error handling, configurable prompts, and guardrails for multi-step workflows.
+4. Expand tests to cover orchestrator behaviour, planning utilities, and any new modules.
 
-Stay outcome-focused: each run should measurably advance the agent toward autonomous, practical software delivery.
+## Collaboration Principles
+- Be explicit about assumptions and call out uncertainties or missing information.
+- When blocked, downgrade gracefully by improving documentation/tests rather than reintroducing toy artefacts.
+- Favour small, composable utilities over monoliths; design for extensibility.
+- Treat security, privacy, and reliability as first-class concerns.
+
+## When to Update this Brief
+- If the strategic direction changes materially, revise this prompt to keep future runs aligned with the latest mission and context.
+- Document major revisions in the state/backlog artifacts so the evolution of the brief remains traceable.
