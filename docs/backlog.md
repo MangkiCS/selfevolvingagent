@@ -3,7 +3,7 @@
 _Status key:_ `[ ]` open, `[~]` in progress, `[x]` done.
 
 ## Ready Next (High Priority)
-- [ ] Audit `agent/orchestrator.py` to document the current execution flow, key entry points, and how prompts are loaded. Capture findings in `docs/orchestrator_overview.md`.
+- [x] Audit `agent/orchestrator.py` to document the current execution flow, key entry points, and how prompts are loaded. Capture findings in `docs/orchestrator_overview.md`.
 - [ ] Replace the `add_example_code()` fallback with logic that selects meaningful tasks from the backlog before editing files.
 - [ ] Define a `TaskSpec` data model (e.g., in `agent/core/taskspec.py`) that captures requested changes, context, and acceptance criteria, alongside unit tests.
 
