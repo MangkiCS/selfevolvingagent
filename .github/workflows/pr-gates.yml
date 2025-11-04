@@ -1,13 +1,14 @@
 name: pr-gates
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize, reopened, labeled]
 
 # Wichtig: globale Write-Rechte, sonst darf der Merge-Job nicht mergen
 permissions:
   contents: write
   pull-requests: write
-  checks: read
+  checks: write
+  statuses: write
 
 jobs:
   quality:
@@ -39,4 +40,37 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: pytest -q --maxfail=1 --disable-warnings --cov=. --cov-config=.config/coverage.toml
+
+      - name: Report required status
+        if: ${{ always() && github.event_name == 'pull_request' }}
+        uses: actions/github-script@v7
+        env:
+          JOB_STATUS: ${{ job.status }}
+        with:
+          script: |
+            const sha = context.payload.pull_request?.head?.sha;
+
+            if (!sha) {
+              core.setFailed('Cannot determine pull request head SHA for status reporting.');
+              return;
+            }
+
+            const conclusion = process.env.JOB_STATUS === 'success' ? 'success' : 'failure';
+
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'pr-gates / quality',
+              head_sha: sha,
+              status: 'completed',
+              conclusion,
+              completed_at: new Date().toISOString(),
+              details_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              output: {
+                title: 'pr-gates / quality',
+                summary: conclusion === 'success'
+                  ? 'pr-gates quality checks passed'
+                  : 'pr-gates quality checks failed',
+              },
+            });
 
