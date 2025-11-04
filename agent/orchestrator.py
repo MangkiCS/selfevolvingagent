@@ -21,6 +21,16 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 AUTO_BRANCH_PREFIX = "auto/"
 AUTO_LABEL = "auto"
 
+# Snapshot-Parameter (sparsam halten -> Kosten & Tokens)
+SNAPSHOT_MAX_FILES = 40
+SNAPSHOT_MAX_BYTES_PER_FILE = 4000
+SNAPSHOT_INCLUDE_PREFIXES = ("agent/", "tests/", "docs/")
+SNAPSHOT_EXCLUDE_SUFFIXES = (
+    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico",
+    ".pdf", ".mp4", ".zip", ".gz", ".tar", ".7z",
+    ".min.js", ".min.css", ".lock", ".exe", ".dll",
+)
+
 
 # ---------------- Shell helper (ohne shell=True) ----------------
 def sh(args: List[str], check: bool = True, cwd: pathlib.Path = ROOT) -> str:
@@ -72,6 +82,42 @@ def push_branch(branch: str) -> None:
     sh(["git", "push", "-u", "origin", branch])
 
 
+# ---------------- Repo-Snapshot ----------------
+def build_repo_snapshot(
+    max_files: int = SNAPSHOT_MAX_FILES,
+    max_bytes_per_file: int = SNAPSHOT_MAX_BYTES_PER_FILE,
+) -> str:
+    """Baut einen kompakten Markdown-Snapshot des Repos (nur relevante Dateien, gekürzt)."""
+    try:
+        out = sh(["git", "ls-files"], check=False)
+        files = [f for f in out.splitlines() if f]
+    except Exception:
+        files = []
+
+    # filtern: nur interessante Pfade & keine Binär-/Großdateien
+    selected: List[str] = []
+    for f in files:
+        if not f.startswith(SNAPSHOT_INCLUDE_PREFIXES):
+            continue
+        if any(f.endswith(ext) for ext in SNAPSHOT_EXCLUDE_SUFFIXES):
+            continue
+        selected.append(f)
+        if len(selected) >= max_files:
+            break
+
+    parts: List[str] = []
+    for p in selected:
+        try:
+            data = (ROOT / p).read_text(encoding="utf-8", errors="ignore")[:max_bytes_per_file]
+            parts.append(f"### {p}\n```text\n{data}\n```\n")
+        except Exception:
+            # Datei nicht lesbar -> überspringen
+            continue
+
+    header = f"_Snapshot: {len(selected)} Dateien (je ≤ {max_bytes_per_file} Bytes, gekürzt)._"
+    return header + ("\n\n" + "\n".join(parts) if parts else "\n\n_(keine Inhalte gefunden)_")
+
+
 # ---------------- OpenAI (Responses API) ----------------
 def call_code_model(system: str, user: str) -> dict:
     """
@@ -92,7 +138,6 @@ def call_code_model(system: str, user: str) -> dict:
     if not text:
         # Fallback: zusammensetzen, falls kein output_text vorhanden ist
         try:
-            # resp.output ist eine Liste von Nachrichten/Teilen
             text = "".join(
                 "".join(part.get("text", "") for part in item.get("content", []))  # type: ignore
                 if isinstance(item, dict) else ""
@@ -256,7 +301,15 @@ def main() -> int:
     used_llm = False
     try:
         system = (ROOT / "agent/prompts/system.md").read_text(encoding="utf-8")
-        user = (ROOT / "agent/prompts/task_template.md").read_text(encoding="utf-8")
+        template = (ROOT / "agent/prompts/task_template.md").read_text(encoding="utf-8")
+
+        # Repo-Snapshot bauen und in das Template einfügen (oder anhängen)
+        snapshot = build_repo_snapshot()
+        if "{{repo_snapshot}}" in template:
+            user = template.replace("{{repo_snapshot}}", snapshot)
+        else:
+            user = template + "\n\n---\n## Repository snapshot (truncated)\n" + snapshot
+
         plan = call_code_model(system, user)
         if isinstance(plan, dict) and (plan.get("code_patches") or plan.get("new_tests")):
             apply_plan(plan)
