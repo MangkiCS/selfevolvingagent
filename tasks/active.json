@@ -1,0 +1,46 @@
+[
+  {
+    "task_id": "orchestrator/load-task-specs",
+    "title": "Integrate TaskSpec loader",
+    "summary": "Load structured TaskSpec definitions at the start of each orchestration run.",
+    "details": "Ensure agent/orchestrator.py reads tasks from the repository so planning logic can replace the demo fallback.",
+    "context": [
+      "docs/backlog.md",
+      "docs/orchestrator_overview.md",
+      "agent/core/task_loader.py"
+    ],
+    "acceptance_criteria": [
+      "Orchestrator reads TaskSpec files from the repository tasks directory.",
+      "Failures to load tasks are surfaced with actionable error messages."
+    ],
+    "priority": "high",
+    "tags": [
+      "orchestration",
+      "planning"
+    ],
+    "dependencies": []
+  },
+  {
+    "task_id": "orchestrator/replace-example-fallback",
+    "title": "Retire example fallback flow",
+    "summary": "Replace add_example_code with backlog-driven task execution.",
+    "details": "Use the loaded TaskSpecs to select work, apply modifications, and avoid overwriting sample modules.",
+    "context": [
+      "docs/backlog.md",
+      "docs/ROADMAP.md",
+      "agent/orchestrator.py"
+    ],
+    "acceptance_criteria": [
+      "Orchestrator no longer writes placeholder hello/buildinfo/test files.",
+      "Selected TaskSpec drives the code changes and documentation updates for the run."
+    ],
+    "priority": "high",
+    "tags": [
+      "orchestration",
+      "execution"
+    ],
+    "dependencies": [
+      "orchestrator/load-task-specs"
+    ]
+  }
+]

@@ -66,6 +66,10 @@ Task definitions can be persisted as `.json` files inside a dedicated directory 
 
 Each entry is validated via `TaskSpec.from_dict()`, and duplicate `task_id` values are rejected with a `TaskSpecLoadingError` that points to the conflicting file. This loader forms the foundation for replacing the orchestrator's placeholder fallback with backlog-driven execution.
 
+## Repository Task Catalogue
+
+A sample catalogue of high-priority tasks now lives in `tasks/active.json`. These TaskSpec entries mirror the top items in `docs/backlog.md`, providing concrete fixtures for tests and future orchestrator runs. Update or extend the catalogue as priorities shift so automated flows always have actionable work to select.
+
 ## Follow-Up
 
 - Extend the schema with execution hints (e.g., default target paths or suggested quality gates) as the backlog loader evolves.
