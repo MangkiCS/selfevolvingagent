@@ -21,11 +21,12 @@
 4. **Quality Gates & PR Automation**
    - After applying changes, the orchestrator runs `ruff`, `mypy`, `bandit`, and `pytest` with coverage enforcement.
    - Successful runs commit all modifications, push the `auto/` branch, and open a pull request labelled `auto`.
+   - Failures from subprocesses, quality gates, GitHub API calls, or LLM interactions are appended to `docs/run_events.json` so future runs (and the prompt snapshot) can inspect the most recent diagnostics.
 
 ## Gaps & Risks
 - **Placeholder fallback:** `add_example_code()` produces noisy commits with no business value.
 - **No backlog/task integration:** There is currently no mechanism to ingest structured work items or persist state across runs.
-- **Limited observability:** Logging relies on raw command output, making automated diagnosis difficult.
+- **Event log retention:** Persistent logging now exists under `docs/run_events.json`, but only the most recent 200 entries are stored and the format may need to evolve as telemetry requirements grow.
 - **Snapshot limits:** Hard-coded file caps may hide critical context once the codebase grows; a smarter selection strategy is needed.
 
 ## Opportunities & Next Steps
