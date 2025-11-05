@@ -10,6 +10,7 @@ _Status key:_ `[ ]` open, `[~]` in progress, `[x]` done.
 
 ## Near Term
 - [x] Implement a lightweight backlog loader that reads structured tasks (JSON) and exposes them to the orchestrator (see `agent/core/task_loader.py`).
+- [x] Introduce task selection helpers to prioritise TaskSpec items and format prompt summaries for the orchestrator.
 - [ ] Create telemetry/logging utilities so orchestration steps emit structured logs.
 - [ ] Add integration tests that exercise the orchestrator end-to-end on a sample task without touching production files.
 - [ ] Extend `TaskSpec` with execution hints (e.g., default target paths, suggested quality checks) once the loader is available.
