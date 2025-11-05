@@ -16,9 +16,10 @@ _Status key:_ `[ ]` open, `[~]` in progress, `[x]` done.
 - [ ] Extend `TaskSpec` with execution hints (e.g., default target paths, suggested quality checks) once the loader is available.
 - [x] Persist example task definitions under a repository directory to validate the loader in an end-to-end flow.
   - Sample catalogue maintained at `tasks/active.json`; keep it aligned with the high-priority backlog.
+- [ ] Wire the `CompletedTaskStore` into the orchestration loop so completed tasks are skipped automatically.
 
 ## Discovery / Research
-- [ ] Investigate how to persist state across runs (e.g., via JSON/YAML under `state/` or git notes) without relying on external services.
+- [~] Investigate how to persist state across runs (baseline `CompletedTaskStore` implemented in `agent/core/task_state.py`; follow-up to expand persisted metadata and reconcile concurrent runs).
 - [ ] Explore requirements for integrating with external issue trackers or PR platforms; identify data the orchestrator must accept.
 - [ ] Determine minimal credential and configuration needs for interacting with remote APIs, to request from operators later.
 
