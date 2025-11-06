@@ -21,7 +21,9 @@ _Status key:_ `[ ]` open, `[~]` in progress, `[x]` done.
 - [ ] Extend `TaskSpec` with execution hints (e.g., default target paths, suggested quality checks) once the loader is available.
 - [x] Persist example task definitions under a repository directory to validate the loader in an end-to-end flow.
   - Sample catalogue maintained at `tasks/active.json`; keep it aligned with the high-priority backlog.
-- [ ] Wire the `CompletedTaskStore` into the orchestration loop so completed tasks are skipped automatically.
+- [~] Wire the `CompletedTaskStore` into the orchestration loop so completed tasks are skipped automatically.
+  - `load_task_batch()` and `load_task_prompt()` now read completed identifiers from the persisted state file by default, reducing boilerplate for the orchestrator.
+  - Next: have the orchestrator update the store as tasks complete and automatically skip work that is already marked done.
 
 ## Discovery / Research
 - [~] Investigate how to persist state across runs (baseline `CompletedTaskStore` implemented in `agent/core/task_state.py`; follow-up to expand persisted metadata and reconcile concurrent runs).
