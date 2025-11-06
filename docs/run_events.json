@@ -25,5 +25,14 @@
     "details": {
       "error": "Model response failed: You exceeded your current quota, please check your plan and billing details. For more information on this error, read the docs: https://platform.openai.com/docs/guides/error-codes/api-errors."
     }
+  },
+  {
+    "timestamp": "2025-11-06T23:37:42.170144+00:00",
+    "level": "error",
+    "source": "orchestrator",
+    "message": "LLM call failed",
+    "details": {
+      "error": "Model response failed: You exceeded your current quota, please check your plan and billing details. For more information on this error, read the docs: https://platform.openai.com/docs/guides/error-codes/api-errors."
+    }
   }
 ]
