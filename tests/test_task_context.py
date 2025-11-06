@@ -56,6 +56,7 @@ class TaskContextTests(unittest.TestCase):
         self.assertIn('orchestrator/load-task-specs', prompt)
         self.assertIn('## Blocked Tasks', prompt)
         self.assertIn('Blocked by: orchestrator/load-task-specs', prompt)
+        self.assertNotIn('## Completed Tasks', prompt)
 
     def test_build_task_prompt_validates_limits(self) -> None:
         batch = load_task_batch(self.tasks_dir)
@@ -63,6 +64,16 @@ class TaskContextTests(unittest.TestCase):
             build_task_prompt(batch, ready_limit=0)
         with self.assertRaises(ValueError):
             build_task_prompt(batch, blocked_limit=0)
+
+    def test_build_task_prompt_includes_completed_section(self) -> None:
+        batch = load_task_batch(
+            self.tasks_dir,
+            completed={'orchestrator/load-task-specs'},
+        )
+        prompt = build_task_prompt(batch)
+
+        self.assertIn('## Completed Tasks', prompt)
+        self.assertIn('- orchestrator/load-task-specs', prompt)
 
     def test_load_task_prompt_returns_payload(self) -> None:
         payload = load_task_prompt(self.tasks_dir, ready_limit=1, blocked_limit=1)
@@ -107,6 +118,8 @@ class TaskContextTests(unittest.TestCase):
         )
         self.assertEqual(payload.blocked, ())
         self.assertEqual(payload.completed, ('orchestrator/load-task-specs',))
+        self.assertIn('## Completed Tasks', payload.prompt)
+        self.assertIn('- orchestrator/load-task-specs', payload.prompt)
 
     def test_load_task_prompt_validates_limits(self) -> None:
         with self.assertRaises(ValueError):
@@ -114,11 +127,11 @@ class TaskContextTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             load_task_prompt(self.tasks_dir, blocked_limit=0)
 
-    def test_load_task_batch_missing_directory_raises(self) -> None:
+    def test_load_task_prompt_raises_when_tasks_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            missing = Path(tmpdir) / 'missing-tasks'
+            missing_dir = Path(tmpdir) / 'missing'
             with self.assertRaises(TaskContextError):
-                load_task_batch(missing)
+                load_task_prompt(missing_dir)
 
 
 if __name__ == '__main__':

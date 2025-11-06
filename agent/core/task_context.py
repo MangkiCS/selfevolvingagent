@@ -121,58 +121,31 @@ def load_task_batch(
         (ready) and those still blocked by unmet dependencies.
 
     Raises:
-        TaskContextError: When the directory cannot be read or a task file is
-            invalid.
+        TaskContextError: When the directory cannot be read or contains invalid
+            specifications.
     '''
-    directory = Path(tasks_dir) if tasks_dir is not None else DEFAULT_TASKS_DIR
+    tasks_path = Path(tasks_dir) if tasks_dir is not None else DEFAULT_TASKS_DIR
     completed_ids = _normalise_completed(completed)
     completed_set = set(completed_ids)
 
     try:
-        specs = load_task_specs(directory)
-    except FileNotFoundError as exc:
-        raise TaskContextError(directory, 'Task specification directory not found.') from exc
-    except NotADirectoryError as exc:
-        raise TaskContextError(directory, 'Task specification path is not a directory.') from exc
+        specs = load_task_specs(tasks_path)
+    except (FileNotFoundError, NotADirectoryError) as exc:  # pragma: no cover - exercised via tests
+        raise TaskContextError(tasks_path, str(exc)) from exc
     except TaskSpecLoadingError as exc:
-        details = str(exc)
-        prefix = f'{exc.path}: '
-        if details.startswith(prefix):
-            details = details[len(prefix):]
-        raise TaskContextError(exc.path, f'Invalid task specification: {details}') from exc
+        raise TaskContextError(tasks_path, str(exc)) from exc
 
+    ordered_specs = order_by_priority(specs)
     ready: list[TaskSpec] = []
     blocked: list[TaskSpec] = []
-    for spec in order_by_priority(specs):
-        if spec.dependencies and not all(dep in completed_set for dep in spec.dependencies):
-            blocked.append(spec)
-            continue
-        ready.append(spec)
 
-    return TaskBatch(
-        ready=tuple(ready),
-        blocked=tuple(blocked),
-        completed=completed_ids,
-    )
-
-
-def _format_blocked_section(batch: TaskBatch, blocked_limit: int) -> str:
-    blocked_specs = batch.blocked[:blocked_limit]
-    if not blocked_specs:
-        return 'No blocked tasks.'
-    lines: list[str] = []
-    for spec in blocked_specs:
-        priority_label = spec.priority or 'unspecified'
-        lines.append(f"- [{priority_label}] {spec.task_id}: {spec.summary}")
-        missing = batch.missing_dependencies(spec)
-        if missing:
-            lines.append(f"  * Blocked by: {', '.join(missing)}")
+    for spec in ordered_specs:
+        if all(dependency in completed_set for dependency in spec.dependencies):
+            ready.append(spec)
         else:
-            lines.append('  * Blocked by: dependencies satisfied; awaiting scheduling.')
-        if spec.has_acceptance_criteria():
-            for criterion in spec.acceptance_criteria:
-                lines.append(f"  * Acceptance: {criterion}")
-    return '\n'.join(lines)
+            blocked.append(spec)
+
+    return TaskBatch(tuple(ready), tuple(blocked), completed_ids)
 
 
 def build_task_prompt(
@@ -181,37 +154,79 @@ def build_task_prompt(
     ready_limit: int = 3,
     blocked_limit: int = 3,
 ) -> str:
-    '''Render a markdown summary of ready and blocked tasks for prompt inclusion.'''
+    '''Return a Markdown-formatted summary of ready, blocked, and completed tasks.'''
     if ready_limit <= 0:
         raise ValueError('ready_limit must be positive.')
     if blocked_limit <= 0:
         raise ValueError('blocked_limit must be positive.')
 
-    sections: list[str] = ['## Ready Tasks']
+    sections: list[str] = []
+    sections.append(_render_ready_section(batch, ready_limit))
+    sections.append(_render_blocked_section(batch, blocked_limit))
 
-    if batch.ready:
-        sections.append(summarise_tasks_for_prompt(batch.ready, limit=ready_limit))
-    else:
-        sections.append('No pending tasks.')
+    completed_section = _render_completed_section(batch)
+    if completed_section is not None:
+        sections.append(completed_section)
 
-    sections.append('## Blocked Tasks')
-    sections.append(_format_blocked_section(batch, blocked_limit))
-
-    if batch.completed:
-        sections.append('## Completed Task References')
-        sections.append(', '.join(batch.completed))
-
-    return '\n\n'.join(sections)
+    return '\n\n'.join(section for section in sections if section).strip()
 
 
 def load_task_prompt(
     tasks_dir: Path | str | None = None,
     *,
-    completed: Iterable[str] | None = None,
     ready_limit: int = 3,
     blocked_limit: int = 3,
+    completed: Iterable[str] | None = None,
 ) -> TaskPrompt:
-    '''Load task specifications and return a structured prompt payload for orchestration.'''
+    '''Load task specifications and return both structured and rendered context.'''
+    if ready_limit <= 0:
+        raise ValueError('ready_limit must be positive.')
+    if blocked_limit <= 0:
+        raise ValueError('blocked_limit must be positive.')
+
     batch = load_task_batch(tasks_dir, completed=completed)
     prompt = build_task_prompt(batch, ready_limit=ready_limit, blocked_limit=blocked_limit)
     return TaskPrompt(batch=batch, prompt=prompt)
+
+
+def _render_ready_section(batch: TaskBatch, limit: int) -> str:
+    lines = ['## Ready Tasks']
+    if not batch.ready:
+        lines.append('No ready tasks.')
+        return '\n'.join(lines)
+
+    visible = min(limit, len(batch.ready))
+    lines.append(summarise_tasks_for_prompt(batch.ready, limit=visible))
+    hidden = len(batch.ready) - visible
+    if hidden > 0:
+        lines.append(f'... {hidden} more ready task(s) not shown.')
+    return '\n'.join(lines)
+
+
+def _render_blocked_section(batch: TaskBatch, limit: int) -> str:
+    lines = ['## Blocked Tasks']
+    if not batch.blocked:
+        lines.append('No blocked tasks.')
+        return '\n'.join(lines)
+
+    for spec in batch.blocked[:limit]:
+        priority_label = spec.priority or 'unspecified'
+        lines.append(f'- [{priority_label}] {spec.task_id}: {spec.summary}')
+        missing = batch.missing_dependencies(spec)
+        if missing:
+            lines.append(f'  * Blocked by: {", ".join(missing)}')
+        else:
+            lines.append('  * Blocked by: (no recorded dependencies)')
+    hidden = len(batch.blocked) - min(limit, len(batch.blocked))
+    if hidden > 0:
+        lines.append(f'... {hidden} more blocked task(s) not shown.')
+    return '\n'.join(lines)
+
+
+def _render_completed_section(batch: TaskBatch) -> str | None:
+    if not batch.completed:
+        return None
+    lines = ['## Completed Tasks']
+    for task_id in batch.completed:
+        lines.append(f'- {task_id}')
+    return '\n'.join(lines)

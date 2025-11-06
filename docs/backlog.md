@@ -10,6 +10,7 @@ _Status key:_ `[ ]` open, `[~]` in progress, `[x]` done.
   - Introduced `agent/core/task_context.py` to partition ready and blocked tasks while preparing prompt summaries.
   - Added `load_task_prompt()` helper to provide both structured batches and pre-formatted prompt text for the orchestrator.
   - Extended `load_task_prompt()` to return a `TaskPrompt` payload bundling task identifiers and markdown summaries for orchestrator consumption.
+  - Completed task identifiers now render in the prompt output, giving the orchestrator visibility into previously delivered work.
   - Next: wire the orchestrator prompt builder to consume the `TaskPrompt` payload instead of relying on `add_example_code()`.
 
 ## Near Term
