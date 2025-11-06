@@ -68,9 +68,13 @@ Each entry is validated via `TaskSpec.from_dict()`, and duplicate `task_id` valu
 
 ## Repository Task Catalogue
 
-A sample catalogue of high-priority tasks now lives in `tasks/active.json`. These TaskSpec entries mirror the top items in `docs/backlog.md`, providing concrete fixtures for tests and future orchestrator runs. Update or extend the catalogue as priorities shift so automated flows always have actionable work to select.
+A sample catalogue of high-priority tasks now lives in `tasks/active.json`. These `TaskSpec` entries mirror the top items in `docs/backlog.md`, providing concrete fixtures for tests and future orchestrator runs. Update or extend the catalogue as priorities shift so automated flows always have actionable work to select.
+
+## Task Prompt Payloads
+
+`agent.core.task_context.load_task_prompt()` now returns a `TaskPrompt` dataclass that bundles the `TaskBatch`, a Markdown-formatted summary, and task identifiers ready for logging. The payload exposes convenience properties (`ready`, `blocked`, `completed`) and `to_dict()` for serialisation, making it trivial for the orchestrator to feed backlog context into model prompts or telemetry without bespoke glue code.
 
 ## Follow-Up
 
 - Extend the schema with execution hints (e.g., default target paths or suggested quality gates) as the backlog loader evolves.
-- Capture how task lifecycle state (ready/in progress/done) should be represented once persistence requirements are defined.
+- Capture how task lifecycle state relates to orchestrator persistence (`CompletedTaskStore`) so prompts and durable state stay aligned.

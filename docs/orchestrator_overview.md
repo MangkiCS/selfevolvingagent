@@ -32,6 +32,7 @@
 ## Opportunities & Next Steps
 - Design a structured task specification (e.g., `TaskSpec`) plus storage format that the orchestrator can load safely.
 - Replace `add_example_code()` with logic that selects and executes backlog tasks in a controlled manner.
+- Surface the new `TaskPrompt` payload from `agent.core.task_context` when constructing model prompts so backlog context drives code generation decisions.
 - Capture run history, decisions, and troubleshooting notes under `docs/` to preserve institutional knowledge.
 - Introduce structured logging/telemetry so orchestration steps are traceable.
 

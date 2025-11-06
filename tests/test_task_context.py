@@ -6,6 +6,7 @@ from pathlib import Path
 
 from agent.core.task_context import (
     TaskContextError,
+    TaskPrompt,
     build_task_prompt,
     load_task_batch,
     load_task_prompt,
@@ -63,15 +64,49 @@ class TaskContextTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_task_prompt(batch, blocked_limit=0)
 
-    def test_load_task_prompt_generates_prompt_and_batch(self) -> None:
-        batch, prompt = load_task_prompt(self.tasks_dir, ready_limit=1, blocked_limit=1)
+    def test_load_task_prompt_returns_payload(self) -> None:
+        payload = load_task_prompt(self.tasks_dir, ready_limit=1, blocked_limit=1)
 
+        self.assertIsInstance(payload, TaskPrompt)
+        self.assertTrue(payload.has_ready_tasks())
         self.assertEqual(
-            [spec.task_id for spec in batch.ready],
+            [spec.task_id for spec in payload.ready],
             ['orchestrator/load-task-specs'],
         )
-        self.assertIn('## Ready Tasks', prompt)
-        self.assertIn('## Blocked Tasks', prompt)
+        self.assertEqual(
+            [spec.task_id for spec in payload.blocked],
+            ['orchestrator/replace-example-fallback'],
+        )
+        self.assertIn('## Ready Tasks', payload.prompt)
+        self.assertIn('## Blocked Tasks', payload.prompt)
+
+    def test_task_prompt_to_dict_contains_metadata(self) -> None:
+        payload = load_task_prompt(self.tasks_dir)
+        summary = payload.to_dict()
+
+        self.assertEqual(
+            summary['ready_task_ids'],
+            ['orchestrator/load-task-specs'],
+        )
+        self.assertEqual(
+            summary['blocked_task_ids'],
+            ['orchestrator/replace-example-fallback'],
+        )
+        self.assertEqual(summary['completed_task_ids'], [])
+        self.assertIn('## Ready Tasks', summary['prompt'])
+
+    def test_load_task_prompt_respects_completed_ids(self) -> None:
+        payload = load_task_prompt(
+            self.tasks_dir,
+            completed={'orchestrator/load-task-specs'},
+        )
+
+        self.assertEqual(
+            [spec.task_id for spec in payload.ready],
+            ['orchestrator/load-task-specs', 'orchestrator/replace-example-fallback'],
+        )
+        self.assertEqual(payload.blocked, ())
+        self.assertEqual(payload.completed, ('orchestrator/load-task-specs',))
 
     def test_load_task_prompt_validates_limits(self) -> None:
         with self.assertRaises(ValueError):

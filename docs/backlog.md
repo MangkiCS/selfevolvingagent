@@ -9,7 +9,8 @@ _Status key:_ `[ ]` open, `[~]` in progress, `[x]` done.
 - [~] Integrate the file-backed `TaskSpec` loader into `agent/orchestrator.py`, replacing the placeholder fallback.
   - Introduced `agent/core/task_context.py` to partition ready and blocked tasks while preparing prompt summaries.
   - Added `load_task_prompt()` helper to provide both structured batches and pre-formatted prompt text for the orchestrator.
-  - Next: wire the orchestrator prompt builder to consume `TaskBatch` output instead of relying on `add_example_code()`.
+  - Extended `load_task_prompt()` to return a `TaskPrompt` payload bundling task identifiers and markdown summaries for orchestrator consumption.
+  - Next: wire the orchestrator prompt builder to consume the `TaskPrompt` payload instead of relying on `add_example_code()`.
 
 ## Near Term
 - [x] Implement a lightweight backlog loader that reads structured tasks (JSON) and exposes them to the orchestrator (see `agent/core/task_loader.py`).
