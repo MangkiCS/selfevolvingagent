@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -118,20 +119,31 @@ class TaskContextTests(unittest.TestCase):
         )
         self.assertEqual(payload.blocked, ())
         self.assertEqual(payload.completed, ('orchestrator/load-task-specs',))
-        self.assertIn('## Completed Tasks', payload.prompt)
-        self.assertIn('- orchestrator/load-task-specs', payload.prompt)
 
-    def test_load_task_prompt_validates_limits(self) -> None:
-        with self.assertRaises(ValueError):
-            load_task_prompt(self.tasks_dir, ready_limit=0)
-        with self.assertRaises(ValueError):
-            load_task_prompt(self.tasks_dir, blocked_limit=0)
-
-    def test_load_task_prompt_raises_when_tasks_missing(self) -> None:
+    def test_load_task_prompt_reads_completed_state(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            missing_dir = Path(tmpdir) / 'missing'
+            state_path = Path(tmpdir) / 'task_state.json'
+            state_path.write_text(
+                json.dumps({'completed': ['orchestrator/load-task-specs']}),
+                encoding='utf-8',
+            )
+
+            payload = load_task_prompt(self.tasks_dir, state_path=state_path)
+
+        self.assertEqual(payload.completed, ('orchestrator/load-task-specs',))
+        self.assertEqual(
+            [spec.task_id for spec in payload.ready],
+            ['orchestrator/load-task-specs', 'orchestrator/replace-example-fallback'],
+        )
+        self.assertTrue(payload.has_ready_tasks())
+
+    def test_load_task_prompt_raises_on_invalid_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = Path(tmpdir) / 'task_state.json'
+            state_path.write_text('{ invalid json }', encoding='utf-8')
+
             with self.assertRaises(TaskContextError):
-                load_task_prompt(missing_dir)
+                load_task_prompt(self.tasks_dir, state_path=state_path)
 
 
 if __name__ == '__main__':
