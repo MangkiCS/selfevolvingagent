@@ -1,0 +1,11 @@
+[
+  {
+    "timestamp": "2025-11-06T01:25:20.603826+00:00",
+    "level": "error",
+    "source": "orchestrator",
+    "message": "LLM call failed",
+    "details": {
+      "error": "'path'"
+    }
+  }
+]
