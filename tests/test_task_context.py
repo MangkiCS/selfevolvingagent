@@ -4,7 +4,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent.core.task_context import TaskContextError, build_task_prompt, load_task_batch
+from agent.core.task_context import (
+    TaskContextError,
+    build_task_prompt,
+    load_task_batch,
+    load_task_prompt,
+)
 
 
 class TaskContextTests(unittest.TestCase):
@@ -57,6 +62,22 @@ class TaskContextTests(unittest.TestCase):
             build_task_prompt(batch, ready_limit=0)
         with self.assertRaises(ValueError):
             build_task_prompt(batch, blocked_limit=0)
+
+    def test_load_task_prompt_generates_prompt_and_batch(self) -> None:
+        batch, prompt = load_task_prompt(self.tasks_dir, ready_limit=1, blocked_limit=1)
+
+        self.assertEqual(
+            [spec.task_id for spec in batch.ready],
+            ['orchestrator/load-task-specs'],
+        )
+        self.assertIn('## Ready Tasks', prompt)
+        self.assertIn('## Blocked Tasks', prompt)
+
+    def test_load_task_prompt_validates_limits(self) -> None:
+        with self.assertRaises(ValueError):
+            load_task_prompt(self.tasks_dir, ready_limit=0)
+        with self.assertRaises(ValueError):
+            load_task_prompt(self.tasks_dir, blocked_limit=0)
 
     def test_load_task_batch_missing_directory_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

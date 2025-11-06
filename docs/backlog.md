@@ -8,6 +8,7 @@ _Status key:_ `[ ]` open, `[~]` in progress, `[x]` done.
 - [x] Define a `TaskSpec` data model (e.g., in `agent/core/taskspec.py`) that captures requested changes, context, and acceptance criteria, alongside unit tests.
 - [~] Integrate the file-backed `TaskSpec` loader into `agent/orchestrator.py`, replacing the placeholder fallback.
   - Introduced `agent/core/task_context.py` to partition ready and blocked tasks while preparing prompt summaries.
+  - Added `load_task_prompt()` helper to provide both structured batches and pre-formatted prompt text for the orchestrator.
   - Next: wire the orchestrator prompt builder to consume `TaskBatch` output instead of relying on `add_example_code()`.
 
 ## Near Term
