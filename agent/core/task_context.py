@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from agent.core.task_loader import TaskSpecLoadingError, load_task_specs
 from agent.core.task_selection import order_by_priority, summarise_tasks_for_prompt
@@ -15,6 +15,7 @@ DEFAULT_TASKS_DIR = ROOT / 'tasks'
 __all__ = [
     'TaskContextError',
     'TaskBatch',
+    'TaskPrompt',
     'load_task_batch',
     'build_task_prompt',
     'load_task_prompt',
@@ -45,6 +46,46 @@ class TaskBatch:
         '''Return dependencies of *spec* that are not marked as completed.'''
         completed_set = set(self.completed)
         return tuple(dep for dep in spec.dependencies if dep not in completed_set)
+
+
+@dataclass(frozen=True, slots=True)
+class TaskPrompt:
+    '''Structured payload combining a task batch with a formatted prompt section.'''
+
+    batch: TaskBatch
+    prompt: str
+
+    def is_empty(self) -> bool:
+        '''Return True when no ready or blocked tasks are described.'''
+        return self.batch.is_empty()
+
+    def has_ready_tasks(self) -> bool:
+        '''Return True when at least one task is ready for execution.'''
+        return bool(self.batch.ready)
+
+    @property
+    def ready(self) -> tuple[TaskSpec, ...]:
+        '''Expose the ready task specifications.'''
+        return self.batch.ready
+
+    @property
+    def blocked(self) -> tuple[TaskSpec, ...]:
+        '''Expose the blocked task specifications.'''
+        return self.batch.blocked
+
+    @property
+    def completed(self) -> tuple[str, ...]:
+        '''Expose the normalised completed task identifiers.'''
+        return self.batch.completed
+
+    def to_dict(self) -> dict[str, Any]:
+        '''Return a serialisable representation suitable for logging or prompts.'''
+        return {
+            'prompt': self.prompt,
+            'ready_task_ids': [spec.task_id for spec in self.batch.ready],
+            'blocked_task_ids': [spec.task_id for spec in self.batch.blocked],
+            'completed_task_ids': list(self.batch.completed),
+        }
 
 
 def _normalise_completed(completed: Iterable[str] | None) -> tuple[str, ...]:
@@ -115,61 +156,52 @@ def load_task_batch(
     )
 
 
+def _format_blocked_section(batch: TaskBatch, blocked_limit: int) -> str:
+    blocked_specs = batch.blocked[:blocked_limit]
+    if not blocked_specs:
+        return 'No blocked tasks.'
+    lines: list[str] = []
+    for spec in blocked_specs:
+        priority_label = spec.priority or 'unspecified'
+        lines.append(f"- [{priority_label}] {spec.task_id}: {spec.summary}")
+        missing = batch.missing_dependencies(spec)
+        if missing:
+            lines.append(f"  * Blocked by: {', '.join(missing)}")
+        else:
+            lines.append('  * Blocked by: dependencies satisfied; awaiting scheduling.')
+        if spec.has_acceptance_criteria():
+            for criterion in spec.acceptance_criteria:
+                lines.append(f"  * Acceptance: {criterion}")
+    return '\n'.join(lines)
+
+
 def build_task_prompt(
     batch: TaskBatch,
     *,
     ready_limit: int = 3,
     blocked_limit: int = 3,
 ) -> str:
-    '''Render a prompt-ready task summary for the orchestrator.'''
+    '''Render a markdown summary of ready and blocked tasks for prompt inclusion.'''
     if ready_limit <= 0:
         raise ValueError('ready_limit must be positive.')
     if blocked_limit <= 0:
         raise ValueError('blocked_limit must be positive.')
 
-    ready_specs = batch.ready[:ready_limit]
-    blocked_specs = batch.blocked[:blocked_limit]
+    sections: list[str] = ['## Ready Tasks']
 
-    sections: list[str] = []
-
-    sections.append('## Ready Tasks')
-    if ready_specs:
-        ready_summary = summarise_tasks_for_prompt(
-            ready_specs,
-            limit=len(ready_specs),
-        )
-        sections.append(ready_summary)
+    if batch.ready:
+        sections.append(summarise_tasks_for_prompt(batch.ready, limit=ready_limit))
     else:
-        sections.append('No ready tasks.')
+        sections.append('No pending tasks.')
 
-    sections.append('')
     sections.append('## Blocked Tasks')
-    if blocked_specs:
-        blocked_lines: list[str] = []
-        for spec in blocked_specs:
-            priority_label = spec.priority or 'unspecified'
-            blocked_lines.append(f'- [{priority_label}] {spec.task_id}: {spec.summary}')
-            missing = batch.missing_dependencies(spec)
-            if missing:
-                blocked_lines.append(f'  * Blocked by: {", ".join(missing)}')
-            else:
-                blocked_lines.append('  * Blocked by: satisfied dependencies (await manual review).')
-            if spec.has_acceptance_criteria():
-                for criterion in spec.acceptance_criteria:
-                    blocked_lines.append(f'  * {criterion}')
-            else:
-                blocked_lines.append('  * No acceptance criteria recorded.')
-        sections.append('\n'.join(blocked_lines))
-    else:
-        sections.append('No blocked tasks.')
+    sections.append(_format_blocked_section(batch, blocked_limit))
 
     if batch.completed:
-        sections.append('')
-        sections.append('## Completed Tasks')
-        for task_id in batch.completed:
-            sections.append(f'- {task_id}')
+        sections.append('## Completed Task References')
+        sections.append(', '.join(batch.completed))
 
-    return '\n'.join(sections).strip()
+    return '\n\n'.join(sections)
 
 
 def load_task_prompt(
@@ -178,8 +210,8 @@ def load_task_prompt(
     completed: Iterable[str] | None = None,
     ready_limit: int = 3,
     blocked_limit: int = 3,
-) -> tuple[TaskBatch, str]:
-    '''Return both the loaded task batch and a formatted prompt summary.'''
+) -> TaskPrompt:
+    '''Load task specifications and return a structured prompt payload for orchestration.'''
     batch = load_task_batch(tasks_dir, completed=completed)
     prompt = build_task_prompt(batch, ready_limit=ready_limit, blocked_limit=blocked_limit)
-    return batch, prompt
+    return TaskPrompt(batch=batch, prompt=prompt)
