@@ -12,7 +12,13 @@ from agent.core.taskspec import TaskSpec
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_TASKS_DIR = ROOT / 'tasks'
 
-__all__ = ['TaskContextError', 'TaskBatch', 'load_task_batch', 'build_task_prompt']
+__all__ = [
+    'TaskContextError',
+    'TaskBatch',
+    'load_task_batch',
+    'build_task_prompt',
+    'load_task_prompt',
+]
 
 
 class TaskContextError(RuntimeError):
@@ -50,8 +56,9 @@ def _normalise_completed(completed: Iterable[str] | None) -> tuple[str, ...]:
         if entry is None:
             continue
         text = str(entry).strip()
-        if text:
-            normalised.add(text)
+        if not text:
+            continue
+        normalised.add(text)
     return tuple(sorted(normalised))
 
 
@@ -98,8 +105,8 @@ def load_task_batch(
     for spec in order_by_priority(specs):
         if spec.dependencies and not all(dep in completed_set for dep in spec.dependencies):
             blocked.append(spec)
-        else:
-            ready.append(spec)
+            continue
+        ready.append(spec)
 
     return TaskBatch(
         ready=tuple(ready),
@@ -120,40 +127,59 @@ def build_task_prompt(
     if blocked_limit <= 0:
         raise ValueError('blocked_limit must be positive.')
 
-    lines: list[str] = []
+    ready_specs = batch.ready[:ready_limit]
+    blocked_specs = batch.blocked[:blocked_limit]
 
-    lines.append('## Ready Tasks')
-    if batch.ready:
-        visible_ready = min(ready_limit, len(batch.ready))
-        ready_summary = summarise_tasks_for_prompt(batch.ready, limit=visible_ready)
-        lines.append(ready_summary)
-        remaining_ready = len(batch.ready) - visible_ready
-        if remaining_ready > 0:
-            lines.append(f'... {remaining_ready} additional ready task(s) not shown.')
+    sections: list[str] = []
+
+    sections.append('## Ready Tasks')
+    if ready_specs:
+        ready_summary = summarise_tasks_for_prompt(
+            ready_specs,
+            limit=len(ready_specs),
+        )
+        sections.append(ready_summary)
     else:
-        lines.append('No ready tasks.')
+        sections.append('No ready tasks.')
 
-    lines.append('')
-    lines.append('## Blocked Tasks')
-    if batch.blocked:
-        completed_set = set(batch.completed)
-        visible_blocked = order_by_priority(batch.blocked)[:blocked_limit]
-        for spec in visible_blocked:
+    sections.append('')
+    sections.append('## Blocked Tasks')
+    if blocked_specs:
+        blocked_lines: list[str] = []
+        for spec in blocked_specs:
             priority_label = spec.priority or 'unspecified'
-            lines.append(f'- [{priority_label}] {spec.task_id}: {spec.summary}')
-            missing = [dep for dep in spec.dependencies if dep not in completed_set]
+            blocked_lines.append(f'- [{priority_label}] {spec.task_id}: {spec.summary}')
+            missing = batch.missing_dependencies(spec)
             if missing:
-                missing_labels = ', '.join(missing)
-                lines.append(f'  * Blocked by: {missing_labels}')
+                blocked_lines.append(f'  * Blocked by: {", ".join(missing)}')
             else:
-                lines.append('  * Blocked by: Unknown dependencies.')
+                blocked_lines.append('  * Blocked by: satisfied dependencies (await manual review).')
             if spec.has_acceptance_criteria():
                 for criterion in spec.acceptance_criteria:
-                    lines.append(f'  * {criterion}')
-        remaining_blocked = len(batch.blocked) - len(visible_blocked)
-        if remaining_blocked > 0:
-            lines.append(f'  * ... {remaining_blocked} additional blocked task(s) not shown.')
+                    blocked_lines.append(f'  * {criterion}')
+            else:
+                blocked_lines.append('  * No acceptance criteria recorded.')
+        sections.append('\n'.join(blocked_lines))
     else:
-        lines.append('No blocked tasks.')
+        sections.append('No blocked tasks.')
 
-    return '\\n'.join(lines)
+    if batch.completed:
+        sections.append('')
+        sections.append('## Completed Tasks')
+        for task_id in batch.completed:
+            sections.append(f'- {task_id}')
+
+    return '\n'.join(sections).strip()
+
+
+def load_task_prompt(
+    tasks_dir: Path | str | None = None,
+    *,
+    completed: Iterable[str] | None = None,
+    ready_limit: int = 3,
+    blocked_limit: int = 3,
+) -> tuple[TaskBatch, str]:
+    '''Return both the loaded task batch and a formatted prompt summary.'''
+    batch = load_task_batch(tasks_dir, completed=completed)
+    prompt = build_task_prompt(batch, ready_limit=ready_limit, blocked_limit=blocked_limit)
+    return batch, prompt
