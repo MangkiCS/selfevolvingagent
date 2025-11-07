@@ -152,3 +152,28 @@ def log_token_usage(
         message="token_usage",
         details=details,
     )
+
+
+def log_quota_snapshot(
+    stage: str,
+    *,
+    usage: Optional[Dict[str, Any]] = None,
+    limits: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Record a snapshot of account usage and rate-limit metadata."""
+
+    if not (usage or limits):
+        return None
+
+    details: Dict[str, Any] = {"stage": stage}
+    if usage:
+        details["usage"] = usage
+    if limits:
+        details["limits"] = limits
+
+    return append_event(
+        level="info",
+        source="pipeline",
+        message="openai_quota",
+        details=details,
+    )
