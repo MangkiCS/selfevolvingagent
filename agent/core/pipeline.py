@@ -345,7 +345,20 @@ def _call_model_json(
                 if text:
                     try:
                         payload = json.loads(text)
-                    except Exception:
+                    except Exception as exc:
+                        details = {
+                            "attempt": attempt,
+                            "excerpt": _truncate_message(text),
+                            "error_type": type(exc).__name__,
+                        }
+                        if stage:
+                            details["stage"] = stage
+                        append_event(
+                            level="warning",
+                            source="pipeline",
+                            message="model_json_parse_failed",
+                            details=details,
+                        )
                         payload = {}
                 else:
                     payload = {}
