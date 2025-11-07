@@ -197,3 +197,37 @@ def test_admin_requests_are_logged_and_announced(monkeypatch, capsys):
     stdout = capsys.readouterr().out
     assert "Admin assistance requested" in stdout
     assert "Need API key" in stdout
+
+
+def test_main_does_not_checkout_previous_branch_when_model_fails(monkeypatch):
+    spec = TaskSpec(
+        task_id="task/failure",
+        title="Handle model failure",
+        summary="Ensure orchestrator does not attempt to checkout previous branch when no branch exists.",
+        priority="high",
+    )
+
+    task_prompt = _make_task_prompt(spec)
+
+    monkeypatch.setattr(orchestrator, "load_available_tasks", lambda: [spec])
+    monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
+    monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
+    monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "snapshot")
+    monkeypatch.setattr(orchestrator, "_maybe_create_openai_client", lambda: None)
+
+    checkout_commands: list[list[str]] = []
+
+    def fake_sh(args, check=True, cwd=orchestrator.ROOT):  # type: ignore[override]
+        checkout_commands.append(list(args))
+        return ""
+
+    monkeypatch.setattr(orchestrator, "sh", fake_sh)
+
+    def fail_call_code_model(*_args, **_kwargs):
+        raise RuntimeError("quota exceeded")
+
+    monkeypatch.setattr(orchestrator, "call_code_model", fail_call_code_model)
+
+    result = orchestrator.main()
+    assert result == 1
+    assert ["git", "checkout", "-"] not in checkout_commands
