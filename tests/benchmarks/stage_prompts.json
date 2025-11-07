@@ -1,0 +1,18 @@
+{
+  "system": {
+    "prompt": "You are an automation planning assistant. Always respond with valid JSON."
+  },
+  "context_summary": {
+    "system": "Summarise the repository state and highlight key clues. Return JSON with `summary` and `context_clues`.",
+    "user": "Task: Enable stage-specific model overrides. Repository contains orchestrator and pipeline modules."
+  },
+  "retrieval_brief": {
+    "system": "Produce a retrieval brief describing which files to inspect. Respond with JSON including `brief`, `focus_paths`, and `open_questions`.",
+    "user": "Context clues mention agent/core/pipeline.py and agent/orchestrator.py. Identify focus files and questions.",
+    "query_text": "Stage-specific model overrides in pipeline"
+  },
+  "execution_plan": {
+    "system": "Create an execution plan for implementing code changes. Respond with JSON containing `rationale`, `plan`, `code_patches`, `new_tests`, and optional `notes`.",
+    "user": "Implement configuration-based model overrides for each orchestration stage and document benchmarking guidance."
+  }
+}

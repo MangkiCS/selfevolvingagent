@@ -24,6 +24,10 @@ DEFAULT_API_MAX_RETRIES = 2
 DEFAULT_API_POLL_INTERVAL = 1.5
 DEFAULT_API_REQUEST_TIMEOUT = 30.0
 
+CONTEXT_MODEL_ENV = "CONTEXT_MODEL"
+RETRIEVAL_MODEL_ENV = "RETRIEVAL_MODEL"
+EXECUTION_MODEL_ENV = "EXECUTION_MODEL"
+
 
 @dataclass
 class StageUsage:
@@ -123,6 +127,38 @@ def _env_int(name: str, default: int) -> int:
         return int(value)
     except ValueError:
         return default
+
+
+_STAGE_MODEL_ENV: Dict[str, str] = {
+    "context_summary": CONTEXT_MODEL_ENV,
+    "retrieval_brief": RETRIEVAL_MODEL_ENV,
+    "execution_plan": EXECUTION_MODEL_ENV,
+}
+
+
+def _resolve_stage_model(stage: str, override: Optional[str]) -> Tuple[str, str]:
+    if override:
+        candidate = override.strip()
+        if candidate:
+            return candidate, "parameter"
+
+    env_var = _STAGE_MODEL_ENV.get(stage)
+    if env_var:
+        candidate = os.environ.get(env_var, "").strip()
+        if candidate:
+            return candidate, f"env:{env_var}"
+
+    return DEFAULT_MODEL, "default"
+
+
+def _log_model_selection(stage: str, model: str, source: str) -> None:
+    details = {"stage": stage, "model": model, "source": source}
+    append_event(
+        level="info",
+        source="pipeline",
+        message="model_selected",
+        details=details,
+    )
 
 
 def _extract_response_text(parts: Optional[Iterable[object]]) -> str:
@@ -251,6 +287,7 @@ def _call_model_json(
     system_prompt: str,
     user_prompt: str,
     model: str = DEFAULT_MODEL,
+    stage: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], StageUsage]:
     timeout = _env_float("OPENAI_API_TIMEOUT", DEFAULT_API_TIMEOUT)
     max_retries = max(1, _env_int("OPENAI_API_MAX_RETRIES", DEFAULT_API_MAX_RETRIES))
@@ -299,6 +336,16 @@ def _call_model_json(
                         payload = {}
                 else:
                     payload = {}
+                append_event(
+                    level="info",
+                    source="pipeline",
+                    message="model_call_completed",
+                    details={
+                        "model": current_model,
+                        **({"stage": stage} if stage else {}),
+                        "attempts": attempt,
+                    },
+                )
                 return payload, _extract_usage(response)
 
             if status == "failed" and getattr(response, "error", None):
@@ -344,10 +391,19 @@ def run_context_summary(
     *,
     system_prompt: str,
     user_prompt: str,
+    model_override: Optional[str] = None,
 ) -> ContextSummary:
     stage_name = "context_summary"
     log_stage_transition(stage_name, "start")
-    payload, usage = _call_model_json(client, system_prompt=system_prompt, user_prompt=user_prompt)
+    model_name, source = _resolve_stage_model(stage_name, model_override)
+    _log_model_selection(stage_name, model_name, source)
+    payload, usage = _call_model_json(
+        client,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        model=model_name,
+        stage=stage_name,
+    )
     summary = _normalise_text(payload.get("summary") or payload.get("context_summary"))
     clues = _normalise_context_clues(payload.get("context_clues"))
     result = ContextSummary(summary=summary, context_clues=clues, usage=usage, raw=payload)
@@ -365,10 +421,19 @@ def run_retrieval_brief(
     vector_store: Optional[VectorStore] = None,
     query_text: Optional[str] = None,
     max_snippets: int = 3,
+    model_override: Optional[str] = None,
 ) -> RetrievalBrief:
     stage_name = "retrieval_brief"
     log_stage_transition(stage_name, "start")
-    payload, usage = _call_model_json(client, system_prompt=system_prompt, user_prompt=user_prompt)
+    model_name, source = _resolve_stage_model(stage_name, model_override)
+    _log_model_selection(stage_name, model_name, source)
+    payload, usage = _call_model_json(
+        client,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        model=model_name,
+        stage=stage_name,
+    )
     brief = _normalise_text(payload.get("brief") or payload.get("retrieval_brief"))
     selected_ids = _ensure_str_list(
         payload.get("selected_context_ids") or payload.get("context_ids")
@@ -451,10 +516,19 @@ def run_execution_plan(
     *,
     system_prompt: str,
     user_prompt: str,
+    model_override: Optional[str] = None,
 ) -> ExecutionPlan:
     stage_name = "execution_plan"
     log_stage_transition(stage_name, "start")
-    payload, usage = _call_model_json(client, system_prompt=system_prompt, user_prompt=user_prompt)
+    model_name, source = _resolve_stage_model(stage_name, model_override)
+    _log_model_selection(stage_name, model_name, source)
+    payload, usage = _call_model_json(
+        client,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        model=model_name,
+        stage=stage_name,
+    )
     plan = ExecutionPlan(
         rationale=_normalise_text(payload.get("rationale")),
         plan=_normalise_plan_steps(payload.get("plan")),
