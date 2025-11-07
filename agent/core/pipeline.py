@@ -18,6 +18,7 @@ from agent.core.vector_store import QueryResult, VectorStore
 
 
 DEFAULT_MODEL = "gpt-5-codex"
+FALLBACK_MODEL = "gpt-5"
 DEFAULT_API_TIMEOUT = 1800.0
 DEFAULT_API_MAX_RETRIES = 2
 DEFAULT_API_POLL_INTERVAL = 1.5
@@ -257,11 +258,12 @@ def _call_model_json(
     request_timeout = max(1.0, _env_float("OPENAI_API_REQUEST_TIMEOUT", DEFAULT_API_REQUEST_TIMEOUT))
 
     last_error: Optional[Exception] = None
+    current_model = model
     for attempt in range(1, max_retries + 1):
         try:
             deadline = time.monotonic() + timeout
             response = client.responses.create(
-                model=model,
+                model=current_model,
                 input=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -311,9 +313,24 @@ def _call_model_json(
                 level="warning",
                 source="pipeline",
                 message="LLM call attempt failed",
-                details={"attempt": attempt, "error": str(exc)},
+                details={"attempt": attempt, "model": current_model, "error": str(exc)},
             )
             if attempt < max_retries:
+                error_message = str(exc).lower()
+                if (
+                    "exceeded your current quota" in error_message
+                    and current_model == DEFAULT_MODEL
+                ):
+                    current_model = FALLBACK_MODEL
+                    append_event(
+                        level="info",
+                        source="pipeline",
+                        message="Retrying LLM call with fallback model after quota rejection",
+                        details={
+                            "attempt": attempt + 1,
+                            "model": current_model,
+                        },
+                    )
                 sleep_seconds = min(2 ** (attempt - 1), 5)
                 time.sleep(sleep_seconds)
 
