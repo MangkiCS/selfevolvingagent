@@ -145,6 +145,18 @@ class TaskContextTests(unittest.TestCase):
             with self.assertRaises(TaskContextError):
                 load_task_prompt(self.tasks_dir, state_path=state_path)
 
+    def test_load_task_prompt_raises_when_directory_missing(self) -> None:
+        missing_dir = self.tasks_dir / 'missing'
+
+        with self.assertRaises(TaskContextError):
+            load_task_prompt(missing_dir)
+
+    def test_load_task_prompt_raises_when_path_is_not_directory(self) -> None:
+        task_file = self.tasks_dir / 'active.json'
+
+        with self.assertRaises(TaskContextError):
+            load_task_prompt(task_file)
+
 
 if __name__ == '__main__':
     unittest.main()

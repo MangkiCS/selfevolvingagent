@@ -12,7 +12,7 @@ Deliver a self-sustaining software automation and delivery agent that can accept
 ## Operating Principles
 - Treat every run as part of a continuous delivery program: analyse context, articulate intent, implement, validate, document.
 - Prefer small, composable improvements that advance the roadmap over cosmetic churn.
-- Never rely on `add_example_code()` or other placeholder fallbacks once better options exist.
+- Do not reintroduce placeholder fallbacks (e.g., the retired `add_example_code()`); rely on TaskSpec-driven execution.
 - Preserve and extend historical knowledge in `docs/` so future runs can build on prior decisions.
 - Default to transparent logging and explicit error handling so failures are diagnosable.
 
@@ -34,7 +34,7 @@ Deliver a self-sustaining software automation and delivery agent that can accept
 1. **Observability & Documentation:** Document current orchestrator behaviour, execution flow, and pain points.
 2. **Task Specification Layer:** Define data models and configuration for describing work items the agent should complete.
 3. **Planning Engine:** Implement structured planning (decompose tasks, estimate effort, track dependencies).
-4. **Execution Engine:** Replace `add_example_code()` with logic that pulls from the backlog/spec, applies code changes, runs checks, and prepares PR-ready output.
+4. **Execution Engine:** Continue evolving the TaskSpec-driven orchestration loop so backlog context directs code changes, checks, and PR-ready output.
 5. **Extensibility:** Design interfaces for integrating external systems (issue trackers, CI, secrets) once credentials are available.
 
 ## Quality & Safety Guardrails
