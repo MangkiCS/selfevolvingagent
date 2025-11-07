@@ -306,9 +306,11 @@ def _call_model_json(
     request_timeout = max(1.0, _env_float("OPENAI_API_REQUEST_TIMEOUT", DEFAULT_API_REQUEST_TIMEOUT))
 
     last_error: Optional[Exception] = None
+    attempt_count = 0
     current_model = model
     for attempt in range(1, max_retries + 1):
         try:
+            attempt_count = attempt
             deadline = time.monotonic() + timeout
             response = client.responses.create(
                 model=current_model,
@@ -402,6 +404,21 @@ def _call_model_json(
                 time.sleep(sleep_seconds)
 
     if last_error:
+        error_message = _truncate_message(str(last_error))
+        details = {
+            "attempts": attempt_count or max_retries,
+            "model": current_model,
+            "error_type": type(last_error).__name__,
+            "error": error_message,
+        }
+        if stage:
+            details["stage"] = stage
+        append_event(
+            level="error",
+            source="pipeline",
+            message="llm_call_exhausted",
+            details=details,
+        )
         raise last_error
     return {}, StageUsage()
 
