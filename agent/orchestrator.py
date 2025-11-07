@@ -22,6 +22,7 @@ from agent.core.pipeline import (
     ContextClue,
     ContextSummary,
     ExecutionPlan,
+    LLMCallError,
     RetrievalBrief,
     run_context_summary,
     run_execution_plan,
@@ -789,6 +790,36 @@ def main() -> int:
                 details={"stage": "execution_plan"},
             )
             return 0
+    except LLMCallError as exc:
+        error_details = {
+            "error": str(exc.original_error),
+            "stage": exc.stage,
+            "attempts": exc.attempts,
+            "model": exc.model,
+            "error_type": type(exc.original_error).__name__,
+        }
+        append_event(
+            level="error",
+            source="orchestrator",
+            message="LLM call failed",
+            details=error_details,
+        )
+        stage_label = exc.stage or "unknown"
+        print(
+            (
+                "LLM call failed: stage='{stage}' attempts={attempts} "
+                "model={model} error={error}"
+            ).format(
+                stage=stage_label,
+                attempts=exc.attempts,
+                model=exc.model,
+                error=exc.original_error,
+            ),
+            file=sys.stderr,
+        )
+        if branch_checked_out:
+            sh(["git", "checkout", "-"], check=False)
+        return 1
     except Exception as e:
         append_event(
             level="error",
