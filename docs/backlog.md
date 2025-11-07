@@ -20,6 +20,12 @@ _Status key:_ `[ ]` open, `[~]` in progress, `[x]` done.
 - [ ] Extend `TaskSpec` with execution hints (e.g., default target paths, suggested quality checks) once the loader is available.
 - [x] Persist example task definitions under a repository directory to validate the loader in an end-to-end flow.
   - Sample catalogue maintained at `tasks/active.json`; keep it aligned with the high-priority backlog.
+- [x] Allow each orchestration stage to select a dedicated LLM model, falling back to the global default when unset.
+  - Environment variables (`CONTEXT_MODEL`, `RETRIEVAL_MODEL`, `EXECUTION_MODEL`) now override the defaults while preserving the existing fallback behaviour.
+  - `_call_model_json` records the model used for each call alongside stage metadata.
+- [x] Benchmark cheaper summarisation models against the current defaults to validate quality before and after stage-specific overrides.
+  - `tests/benchmarks/run_stage_model_benchmark.py` exercises every stage with configurable model lists and captures latency/usage metrics.
+  - `docs/model_benchmarking.md` documents current recommendations and how to re-run the experiment when models change.
 - [~] Wire the `CompletedTaskStore` into the orchestration loop so completed tasks are skipped automatically.
   - `load_task_batch()` and `load_task_prompt()` now read completed identifiers from the persisted state file by default, reducing boilerplate for the orchestrator.
   - Next: have the orchestrator update the store as tasks complete and automatically skip work that is already marked done.
