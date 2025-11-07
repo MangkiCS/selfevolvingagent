@@ -10,6 +10,7 @@ import datetime
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import time
@@ -34,6 +35,9 @@ AUTO_LABEL = "auto"
 
 # Cached catalogue populated during startup for downstream task selection.
 _TASK_CATALOG: Dict[str, TaskSpec] = {}
+
+# Optional override for the next auto branch name.
+_PREFERRED_BRANCH_NAME: Optional[str] = None
 
 # Snapshot-Parameter (sparsam halten -> Kosten & Tokens)
 SNAPSHOT_MAX_FILES = 40
@@ -87,9 +91,14 @@ def ensure_git_identity() -> None:
 
 
 def create_branch() -> str:
-    ts = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    branch = f"{AUTO_BRANCH_PREFIX}{ts}"
+    global _PREFERRED_BRANCH_NAME
+    if _PREFERRED_BRANCH_NAME:
+        branch = _PREFERRED_BRANCH_NAME
+    else:
+        ts = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        branch = f"{AUTO_BRANCH_PREFIX}{ts}"
     sh(["git", "checkout", "-b", branch])
+    _PREFERRED_BRANCH_NAME = None
     return branch
 
 
@@ -302,7 +311,7 @@ def load_available_tasks() -> List[TaskSpec]:
 
 def _prepare_task_prompt() -> Optional[TaskPrompt]:
     try:
-        return load_task_prompt(DEFAULT_TASKS_DIR)
+        task_prompt = load_task_prompt(DEFAULT_TASKS_DIR)
     except TaskContextError as exc:
         append_event(
             level="error",
@@ -310,7 +319,26 @@ def _prepare_task_prompt() -> Optional[TaskPrompt]:
             message="Failed to load task prompt",
             details={"error": str(exc)},
         )
+        raise
+
+    if not task_prompt.prompt.strip() or task_prompt.is_empty():
+        append_event(
+            level="warning",
+            source="orchestrator",
+            message="No task prompt available; skipping orchestration run.",
+        )
         return None
+
+    if not task_prompt.has_ready_tasks():
+        append_event(
+            level="info",
+            source="orchestrator",
+            message="No ready tasks available; nothing to execute.",
+            details={"blocked_task_ids": [spec.task_id for spec in task_prompt.blocked]},
+        )
+        return None
+
+    return task_prompt
 
 
 def _resolve_task_spec(task_id: str) -> Optional[TaskSpec]:
@@ -323,13 +351,74 @@ def _select_task_for_execution(task_prompt: TaskPrompt) -> Optional[TaskSpec]:
     """Choose the highest-priority ready task whose dependencies are satisfied."""
 
     if not task_prompt.ready:
+        append_event(
+            level="info",
+            source="orchestrator",
+            message="Ready queue empty; no task selected.",
+        )
         return None
 
-    ready_specs = [
-        _resolve_task_spec(spec.task_id) or spec for spec in task_prompt.ready
-    ]
+    resolved_ready: List[TaskSpec] = []
+    missing_catalog_entries: List[str] = []
+    for spec in task_prompt.ready:
+        cached = _resolve_task_spec(spec.task_id)
+        if cached is None:
+            missing_catalog_entries.append(spec.task_id)
+            resolved_ready.append(spec)
+        else:
+            resolved_ready.append(cached)
+
+    if missing_catalog_entries:
+        append_event(
+            level="warning",
+            source="orchestrator",
+            message="Ready tasks missing from in-memory catalog; using prompt payload.",
+            details={"missing_task_ids": missing_catalog_entries},
+        )
+
     completed_ids = set(task_prompt.completed)
-    return select_next_task(ready_specs, completed=completed_ids)
+    task = select_next_task(resolved_ready, completed=completed_ids)
+    if task is None:
+        append_event(
+            level="info",
+            source="orchestrator",
+            message="No eligible task found after evaluating ready queue.",
+            details={
+                "ready_task_ids": [spec.task_id for spec in task_prompt.ready],
+                "completed_task_ids": list(task_prompt.completed),
+            },
+        )
+    return task
+
+
+def _slugify_task_identifier(text: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    return slug or "task"
+
+
+def _derive_task_metadata(task: TaskSpec) -> Dict[str, str]:
+    slug = _slugify_task_identifier(task.task_id)
+    branch = f"{AUTO_BRANCH_PREFIX}{slug}"
+    commit_message = f"feat: {task.title}"
+    pr_title = f"{task.title} (auto)"
+    pr_body = task.summary
+    return {
+        "branch": branch,
+        "commit_message": commit_message,
+        "pr_title": pr_title,
+        "pr_body": pr_body,
+    }
+
+
+def _checkout_branch_for_task(branch: str) -> str:
+    global _PREFERRED_BRANCH_NAME
+    previous = _PREFERRED_BRANCH_NAME
+    _PREFERRED_BRANCH_NAME = branch
+    try:
+        return create_branch()
+    finally:
+        if previous is not None:
+            _PREFERRED_BRANCH_NAME = previous
 
 
 def _format_task_prompt_section(task_prompt: TaskPrompt) -> str:
@@ -402,6 +491,19 @@ def _inject_prompt_sections(
         return user.replace("{{repo_snapshot}}", snapshot)
 
     return user + "\n\n---\n## Repository snapshot (truncated)\n" + snapshot
+
+
+def _build_user_prompt(task_prompt: TaskPrompt, task: TaskSpec) -> str:
+    template = (ROOT / "agent/prompts/task_template.md").read_text(encoding="utf-8")
+    backlog_section = _format_task_prompt_section(task_prompt)
+    selected_section = _format_selected_task_section(task)
+    snapshot = build_repo_snapshot()
+    return _inject_prompt_sections(
+        template,
+        backlog_section=backlog_section,
+        selected_section=selected_section,
+        snapshot=snapshot,
+    )
 
 
 # ---------------- Checks ----------------
@@ -515,56 +617,33 @@ def main() -> int:
         print(f"Failed to load task specifications: {exc}", file=sys.stderr)
         return 1
 
-    task_prompt = _prepare_task_prompt()
-    if task_prompt is None:
+    try:
+        task_prompt = _prepare_task_prompt()
+    except TaskContextError as exc:
+        print(f"Failed to prepare task prompt: {exc}", file=sys.stderr)
         return 1
-    if not task_prompt.prompt.strip() or task_prompt.is_empty():
-        append_event(
-            level="warning",
-            source="orchestrator",
-            message="No task prompt available; skipping orchestration run.",
-        )
-        return 0
-    if not task_prompt.has_ready_tasks():
-        append_event(
-            level="info",
-            source="orchestrator",
-            message="No ready tasks available; nothing to execute.",
-            details={"blocked_task_ids": [spec.task_id for spec in task_prompt.blocked]},
-        )
+
+    if task_prompt is None:
         return 0
 
     primary_task = _select_task_for_execution(task_prompt)
     if primary_task is None:
-        append_event(
-            level="info",
-            source="orchestrator",
-            message="No eligible task found after evaluating ready queue.",
-            details={
-                "ready_task_ids": [spec.task_id for spec in task_prompt.ready],
-                "completed_task_ids": list(task_prompt.completed),
-            },
-        )
         return 0
+
+    metadata = _derive_task_metadata(primary_task)
+    branch_name = metadata["branch"]
+    commit_message = metadata["commit_message"]
+    pr_title = metadata["pr_title"]
+    pr_body = metadata["pr_body"]
+
     plan_applied = False
-    branch: Optional[str] = None
     try:
         system = (ROOT / "agent/prompts/system.md").read_text(encoding="utf-8")
-        template = (ROOT / "agent/prompts/task_template.md").read_text(encoding="utf-8")
-
-        backlog_section = _format_task_prompt_section(task_prompt)
-        snapshot = build_repo_snapshot()
-        selected_section = _format_selected_task_section(primary_task)
-        user = _inject_prompt_sections(
-            template,
-            backlog_section=backlog_section,
-            selected_section=selected_section,
-            snapshot=snapshot,
-        )
+        user = _build_user_prompt(task_prompt, primary_task)
 
         plan = call_code_model(system, user)
         if isinstance(plan, dict) and (plan.get("code_patches") or plan.get("new_tests")):
-            branch = create_branch()
+            branch_name = _checkout_branch_for_task(branch_name)
             apply_plan(plan)
             plan_applied = True
         else:
@@ -588,10 +667,6 @@ def main() -> int:
     if not plan_applied:
         return 0
 
-    if branch is None:
-        branch = create_branch()
-
-    commit_message = f"feat: {primary_task.title}"
     commit_all(commit_message)
     try:
         run_local_checks()
@@ -606,10 +681,8 @@ def main() -> int:
         sh(["git", "checkout", "-"], check=False)
         return 1
 
-    push_branch(branch)
-    pr_title = f"{primary_task.title} (auto)"
-    pr_body = primary_task.summary
-    create_pull_request(branch, title=pr_title, body=pr_body)
+    push_branch(branch_name)
+    create_pull_request(branch_name, title=pr_title, body=pr_body)
     return 0
 
 
