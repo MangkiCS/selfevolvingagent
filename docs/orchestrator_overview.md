@@ -5,20 +5,25 @@
 
 ## Execution Flow (current MVP)
 
-1. **Git Identity & Branching**
+1. **TaskSpec Discovery**
+   - `load_available_tasks()` scans the repository `tasks/` directory at startup.
+   - Task definitions are parsed via `agent.core.task_loader.load_task_specs()` and cached for later selection.
+   - Failures (missing directory, invalid JSON, duplicate identifiers) halt the run with actionable error messages recorded in the event log.
+
+2. **Git Identity & Branching**
    - `ensure_git_identity()` configures the default Git author if missing.
    - `create_branch()` creates a new branch prefixed with `auto/` using the current UTC timestamp.
 
-2. **Repository Snapshot**
+3. **Repository Snapshot**
    - `build_repo_snapshot()` collects up to 40 files from `agent/`, `tests/`, and `docs/`, skipping large/binary artefacts and truncating each file to 4000 bytes.
    - The snapshot is embedded in the LLM prompt so the model can reason about the repository without fetching everything.
 
-3. **Prompt & Code Application**
+4. **Prompt & Code Application**
    - The orchestrator loads system and task prompts from `agent/prompts/` and augments them with TaskSpec context produced by `agent.core.task_context.load_task_prompt()`.
    - Helper `write()` persists any returned `code_patches` or `new_tests` by overwriting the target files atomically.
    - When the model does not return actionable edits, the run records a warning event and exits without modifying the repository.
 
-4. **Checks & PR Automation**
+5. **Checks & PR Automation**
    - Local quality gates are currently disabled; `run_local_checks()` simply records that they were skipped.
    - Successful runs commit all modifications, push the `auto/` branch, and open a pull request labelled `auto`.
    - Failures from subprocesses, GitHub API calls, or LLM interactions are appended to `docs/run_events.json` so future runs (and the prompt snapshot) can inspect the most recent diagnostics.
