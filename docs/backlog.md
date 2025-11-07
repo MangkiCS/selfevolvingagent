@@ -4,12 +4,12 @@ _Status key:_ `[ ]` open, `[~]` in progress, `[x]` done.
 
 ## Ready Next (High Priority)
 - [x] Audit `agent/orchestrator.py` to document the current execution flow, key entry points, and how prompts are loaded. Capture findings in `docs/orchestrator_overview.md`.
-- [x] Replace the `add_example_code()` fallback with logic that selects meaningful tasks from the backlog before editing files.
+- [x] Replace the legacy fallback with logic that selects meaningful tasks from the backlog before editing files.
 - [x] Define a `TaskSpec` data model (e.g., in `agent/core/taskspec.py`) that captures requested changes, context, and acceptance criteria, alongside unit tests.
-- [x] Integrate the file-backed `TaskSpec` loader into `agent/orchestrator.py`, replacing the placeholder fallback.
-  - The orchestrator now loads backlog context via `load_task_prompt()` and injects ready-task details into the model prompt.
-  - Runs skip execution when no ready tasks exist, emitting events instead of mutating the repository with placeholder content.
-  - Commit and PR metadata reuse the selected TaskSpec title so automation outputs align with the backlog terminology.
+- [x] Integrate the file-backed `TaskSpec` loader into `agent/orchestrator.py`, replacing placeholder behaviour.
+  - The orchestrator now builds prompts with a dedicated "Selected Task" section describing the chosen TaskSpec.
+  - Execution skips gracefully when no ready tasks remain and never writes the former hello/buildinfo/test placeholders.
+  - End-to-end orchestration tests validate that TaskSpec-driven plans reach the execution pipeline without touching sample modules.
   - Next: persist task completion state automatically once changes land to keep the backlog in sync.
 
 ## Near Term

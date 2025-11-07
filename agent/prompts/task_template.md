@@ -37,4 +37,7 @@
 ## Task Backlog
 {{task_prompt}}
 
+## Selected Task for Execution
+{{selected_task}}
+
 Your mission is to push the system toward autonomous, production-grade software delivery with each iteration.

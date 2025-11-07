@@ -26,6 +26,7 @@ from agent.core.task_context import (
 )
 from agent.core.task_loader import TaskSpecLoadingError, load_task_specs
 from agent.core.taskspec import TaskSpec
+from agent.core.task_selection import select_next_task, summarise_tasks_for_prompt
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 AUTO_BRANCH_PREFIX = "auto/"
@@ -312,15 +313,95 @@ def _prepare_task_prompt() -> Optional[TaskPrompt]:
         return None
 
 
+def _resolve_task_spec(task_id: str) -> Optional[TaskSpec]:
+    """Return the cached TaskSpec for *task_id*, if available."""
+
+    return _TASK_CATALOG.get(task_id)
+
+
+def _select_task_for_execution(task_prompt: TaskPrompt) -> Optional[TaskSpec]:
+    """Choose the highest-priority ready task whose dependencies are satisfied."""
+
+    if not task_prompt.ready:
+        return None
+
+    ready_specs = [
+        _resolve_task_spec(spec.task_id) or spec for spec in task_prompt.ready
+    ]
+    completed_ids = set(task_prompt.completed)
+    return select_next_task(ready_specs, completed=completed_ids)
+
+
 def _format_task_prompt_section(task_prompt: TaskPrompt) -> str:
-    ready_ids = [spec.task_id for spec in task_prompt.ready]
-    identifiers = ", ".join(ready_ids) if ready_ids else "none"
+    ready_summary = summarise_tasks_for_prompt(task_prompt.ready, limit=5)
     sections = [
         "## Task Backlog",
         task_prompt.prompt.strip(),
-        f"Ready task identifiers: {identifiers}",
+        ready_summary,
     ]
     return "\n\n".join(part for part in sections if part).strip()
+
+
+def _format_selected_task_section(task: TaskSpec) -> str:
+    """Render the selected TaskSpec in a structured markdown section."""
+
+    lines: List[str] = [
+        f"### Task ID: {task.task_id}",
+        f"**Title:** {task.title}",
+        f"**Summary:** {task.summary}",
+        f"**Priority:** {task.priority or 'unspecified'}",
+    ]
+
+    if task.details:
+        lines.extend(["", task.details.strip()])
+
+    if task.context:
+        lines.append("")
+        lines.append("**Context references:**")
+        lines.extend(f"- {entry}" for entry in task.context)
+
+    if task.acceptance_criteria:
+        lines.append("")
+        lines.append("**Acceptance criteria:**")
+        lines.extend(f"- {criterion}" for criterion in task.acceptance_criteria)
+
+    if task.dependencies:
+        deps = ", ".join(task.dependencies)
+        lines.append("")
+        lines.append(f"**Dependencies:** {deps}")
+
+    if task.tags:
+        tags = ", ".join(task.tags)
+        lines.append("")
+        lines.append(f"**Tags:** {tags}")
+
+    return "\n".join(lines).strip()
+
+
+def _inject_prompt_sections(
+    template: str,
+    *,
+    backlog_section: str,
+    selected_section: str,
+    snapshot: str,
+) -> str:
+    """Return the final user prompt with backlog, selected task, and snapshot."""
+
+    user = template
+    if "{{task_prompt}}" in user:
+        user = user.replace("{{task_prompt}}", backlog_section)
+    else:
+        user = user + "\n\n" + backlog_section
+
+    if "{{selected_task}}" in user:
+        user = user.replace("{{selected_task}}", selected_section)
+    else:
+        user = user + "\n\n## Selected Task\n" + selected_section
+
+    if "{{repo_snapshot}}" in user:
+        return user.replace("{{repo_snapshot}}", snapshot)
+
+    return user + "\n\n---\n## Repository snapshot (truncated)\n" + snapshot
 
 
 # ---------------- Checks ----------------
@@ -453,7 +534,18 @@ def main() -> int:
         )
         return 0
 
-    primary_task = _TASK_CATALOG.get(task_prompt.ready[0].task_id, task_prompt.ready[0])
+    primary_task = _select_task_for_execution(task_prompt)
+    if primary_task is None:
+        append_event(
+            level="info",
+            source="orchestrator",
+            message="No eligible task found after evaluating ready queue.",
+            details={
+                "ready_task_ids": [spec.task_id for spec in task_prompt.ready],
+                "completed_task_ids": list(task_prompt.completed),
+            },
+        )
+        return 0
     plan_applied = False
     branch: Optional[str] = None
     try:
@@ -461,16 +553,14 @@ def main() -> int:
         template = (ROOT / "agent/prompts/task_template.md").read_text(encoding="utf-8")
 
         backlog_section = _format_task_prompt_section(task_prompt)
-        if "{{task_prompt}}" in template:
-            template = template.replace("{{task_prompt}}", backlog_section)
-        else:
-            template = template + "\n\n" + backlog_section
-
         snapshot = build_repo_snapshot()
-        if "{{repo_snapshot}}" in template:
-            user = template.replace("{{repo_snapshot}}", snapshot)
-        else:
-            user = template + "\n\n---\n## Repository snapshot (truncated)\n" + snapshot
+        selected_section = _format_selected_task_section(primary_task)
+        user = _inject_prompt_sections(
+            template,
+            backlog_section=backlog_section,
+            selected_section=selected_section,
+            snapshot=snapshot,
+        )
 
         plan = call_code_model(system, user)
         if isinstance(plan, dict) and (plan.get("code_patches") or plan.get("new_tests")):

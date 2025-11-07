@@ -8,11 +8,11 @@ Provide a living backlog that guides the transformation from the current MVP int
 - Catalogue existing modules, tests, and tooling gaps.
 - Document findings and architectural questions.
 
-## Phase 1 – Replace the Placeholder Fallback
-1. Specify the desired task intake mechanism (e.g., structured request files, API queue).
-2. Refactor the orchestrator to read actionable work instead of rewriting sample modules.
+## Phase 1 – TaskSpec-Driven Orchestration
+1. Specify the desired task intake mechanism (structured TaskSpec files tracked in-repo).
+2. Refactor the orchestrator to load TaskSpecs, prioritise ready work, and feed instructions directly into the execution pipeline.
 3. Introduce configuration and state management needed to track task progress.
-4. Add comprehensive tests (unit and integration) covering the new orchestration flow.
+4. Add comprehensive tests (unit and integration) covering the TaskSpec-driven orchestration flow.
 
 ## Phase 2 – Execution Capabilities
 - Build core automation primitives (code editing, diff planning, test running, reporting).
@@ -30,5 +30,5 @@ Provide a living backlog that guides the transformation from the current MVP int
 
 ## Immediate Next Steps
 - [x] Document the current orchestrator control flow and identify seams for injecting real task handling (see `docs/orchestrator_overview.md`).
-- [ ] Draft a design for a persistent task queue or request format to replace `add_example_code`.
-- [ ] Begin implementing the new orchestration pathway with supporting tests.
+- [x] Implement the TaskSpec-driven orchestration pathway with supporting tests.
+- [ ] Finalise a design for persisting task queue state so completed TaskSpecs are skipped automatically.
