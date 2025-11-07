@@ -23,6 +23,7 @@ DEFAULT_API_TIMEOUT = 1800.0
 DEFAULT_API_MAX_RETRIES = 2
 DEFAULT_API_POLL_INTERVAL = 1.5
 DEFAULT_API_REQUEST_TIMEOUT = 30.0
+ERROR_MESSAGE_MAX_LENGTH = 240
 
 CONTEXT_MODEL_ENV = "CONTEXT_MODEL"
 RETRIEVAL_MODEL_ENV = "RETRIEVAL_MODEL"
@@ -199,6 +200,16 @@ def _normalise_text(value: Any) -> str:
     return str(value).strip()
 
 
+def _truncate_message(message: str, *, limit: int = ERROR_MESSAGE_MAX_LENGTH) -> str:
+    if limit <= 0:
+        return ""
+    if len(message) <= limit:
+        return message
+    if limit == 1:
+        return message[:1]
+    return message[: limit - 1] + "…"
+
+
 def _ensure_str_list(value: Any) -> List[str]:
     if value is None:
         return []
@@ -356,11 +367,20 @@ def _call_model_json(
             raise RuntimeError(f"Model response did not complete (status={status})")
         except Exception as exc:  # pragma: no cover - defensive logging
             last_error = exc
+            error_message = _truncate_message(str(exc))
+            details = {
+                "attempt": attempt,
+                "model": current_model,
+                "error_type": type(exc).__name__,
+                "error": error_message,
+            }
+            if stage:
+                details["stage"] = stage
             append_event(
                 level="warning",
                 source="pipeline",
                 message="LLM call attempt failed",
-                details={"attempt": attempt, "model": current_model, "error": str(exc)},
+                details=details,
             )
             if attempt < max_retries:
                 error_message = str(exc).lower()
