@@ -13,12 +13,20 @@ import pathlib
 import re
 import subprocess
 import sys
-import time
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 from openai import OpenAI
 
 from agent.core.event_log import append_event
+from agent.core.pipeline import (
+    ContextClue,
+    ContextSummary,
+    ExecutionPlan,
+    RetrievalBrief,
+    run_context_summary,
+    run_execution_plan,
+    run_retrieval_brief,
+)
 from agent.core.task_context import (
     DEFAULT_TASKS_DIR,
     TaskContextError,
@@ -156,141 +164,13 @@ def build_repo_snapshot(
 
 
 # ---------------- OpenAI (Responses API) ----------------
-DEFAULT_API_TIMEOUT = 1800.0
-DEFAULT_API_MAX_RETRIES = 2
-DEFAULT_API_POLL_INTERVAL = 1.5
-DEFAULT_API_REQUEST_TIMEOUT = 30.0
-
-
-def _env_float(name: str, default: float) -> float:
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    try:
-        return float(value)
-    except ValueError:
-        return default
-
-
-def _env_int(name: str, default: int) -> int:
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    try:
-        return int(value)
-    except ValueError:
-        return default
-
-
-def _extract_response_text(parts: Optional[Iterable[object]]) -> str:
-    if not parts:
-        return ""
-    chunks: List[str] = []
-    for item in parts:
-        if isinstance(item, dict):
-            item_type = item.get("type")
-            content = item.get("content")
-        else:
-            item_type = getattr(item, "type", None)
-            content = getattr(item, "content", None)
-        if item_type == "message":
-            if not content:
-                continue
-            for segment in content:
-                if isinstance(segment, dict):
-                    segment_type = segment.get("type")
-                    text = segment.get("text", "")
-                else:
-                    segment_type = getattr(segment, "type", None)
-                    text = getattr(segment, "text", "")
-                if segment_type == "output_text":
-                    if text:
-                        chunks.append(text)
-        elif item_type == "output_text":  # defensive: flattened content
-            text = item.get("text", "") if isinstance(item, dict) else getattr(item, "text", "")
-            if text:
-                chunks.append(text)
-    return "".join(chunks)
-
-
-def call_code_model(system: str, user: str) -> dict:
-    """
-    Ruft GPT-5-Codex (oder kompatibles Modell) über die Responses API auf.
-    Ohne `response_format` (kompatibel mit aktuellen SDKs); wir parsen JSON aus output_text.
-    """
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-    timeout = _env_float("OPENAI_API_TIMEOUT", DEFAULT_API_TIMEOUT)
-    max_retries = _env_int("OPENAI_API_MAX_RETRIES", DEFAULT_API_MAX_RETRIES)
-    poll_interval = max(0.2, _env_float("OPENAI_API_POLL_INTERVAL", DEFAULT_API_POLL_INTERVAL))
-    request_timeout = max(1.0, _env_float("OPENAI_API_REQUEST_TIMEOUT", DEFAULT_API_REQUEST_TIMEOUT))
-    if max_retries < 1:
-        max_retries = 1
-
-    last_error: Optional[Exception] = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            deadline = time.monotonic() + timeout
-            response = client.responses.create(
-                model="gpt-5-codex",
-                input=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                background=True,
-                timeout=min(request_timeout, timeout),
-            )
-
-            response_id = getattr(response, "id", None)
-            status = getattr(response, "status", None)
-            while status in (None, "queued", "in_progress"):
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError("LLM call exceeded configured timeout")
-                time.sleep(min(poll_interval, remaining))
-                if not response_id:
-                    break
-                response = client.responses.retrieve(
-                    response_id,
-                    timeout=min(request_timeout, max(remaining, 0.1)),
-                )
-                status = getattr(response, "status", None)
-
-            if status == "completed":
-                text = getattr(response, "output_text", None)
-                if not text:
-                    text = _extract_response_text(getattr(response, "output", None))
-                try:
-                    return json.loads(text) if text else {}
-                except Exception:
-                    return {}
-
-            if status == "failed" and getattr(response, "error", None):
-                err = getattr(response, "error")
-                message = getattr(err, "message", repr(err))
-                raise RuntimeError(f"Model response failed: {message}")
-
-            raise RuntimeError(f"Model response did not complete (status={status})")
-        except Exception as exc:  # pragma: no cover - defensive logging
-            last_error = exc
-            print(
-                f"OpenAI call attempt {attempt}/{max_retries} failed: {exc}",
-                file=sys.stderr,
-            )
-            if attempt < max_retries:
-                sleep_seconds = min(2 ** (attempt - 1), 5)
-                time.sleep(sleep_seconds)
-
-    if last_error:
-        raise last_error
-    return {}
-
-
-def apply_plan(plan: dict) -> None:
+def apply_plan(plan: ExecutionPlan) -> None:
     """Schreibt vom Modell gelieferte Patches/Tests ins Repo."""
-    for p in plan.get("code_patches", []) or []:
-        write(p["path"], p["content"])
-    for t in plan.get("new_tests", []) or []:
-        write(t["path"], t["content"])
+
+    for patch in plan.code_patches:
+        write(patch["path"], patch["content"])
+    for test in plan.new_tests:
+        write(test["path"], test["content"])
 
 
 def load_available_tasks() -> List[TaskSpec]:
@@ -467,43 +347,132 @@ def _format_selected_task_section(task: TaskSpec) -> str:
     return "\n".join(lines).strip()
 
 
-def _inject_prompt_sections(
-    template: str,
-    *,
-    backlog_section: str,
-    selected_section: str,
-    snapshot: str,
-) -> str:
-    """Return the final user prompt with backlog, selected task, and snapshot."""
-
-    user = template
-    if "{{task_prompt}}" in user:
-        user = user.replace("{{task_prompt}}", backlog_section)
-    else:
-        user = user + "\n\n" + backlog_section
-
-    if "{{selected_task}}" in user:
-        user = user.replace("{{selected_task}}", selected_section)
-    else:
-        user = user + "\n\n## Selected Task\n" + selected_section
-
-    if "{{repo_snapshot}}" in user:
-        return user.replace("{{repo_snapshot}}", snapshot)
-
-    return user + "\n\n---\n## Repository snapshot (truncated)\n" + snapshot
-
-
-def _build_user_prompt(task_prompt: TaskPrompt, task: TaskSpec) -> str:
-    template = (ROOT / "agent/prompts/task_template.md").read_text(encoding="utf-8")
+def _build_context_summary_prompt(task_prompt: TaskPrompt, task: TaskSpec) -> str:
     backlog_section = _format_task_prompt_section(task_prompt)
     selected_section = _format_selected_task_section(task)
     snapshot = build_repo_snapshot()
-    return _inject_prompt_sections(
-        template,
-        backlog_section=backlog_section,
-        selected_section=selected_section,
-        snapshot=snapshot,
+    instructions = (
+        "# Context summarisation stage\n"
+        "You will receive backlog context, the selected task, and a truncated repository snapshot. "
+        "Summarise only the information necessary to plan retrieval for a downstream coding model.\n\n"
+        "Return JSON with the following keys:\n"
+        "- `summary`: concise narrative (<= 300 words) describing the task objective, constraints, and any critical implementation details.\n"
+        "- `context_clues`: array (max 5) of objects with `id`, `path` (optional), `rationale`, and `content` (<= 500 characters, copy directly from the provided material when referencing code).\n"
+        "Ensure clue ids follow the format `clue-1`, `clue-2`, ... for downstream reference."
     )
+    sections = [
+        instructions,
+        "\n## Task Backlog\n" + backlog_section,
+        "\n## Selected Task\n" + selected_section,
+        "\n## Repository Snapshot (truncated)\n" + snapshot,
+    ]
+    return "\n".join(sections)
+
+
+def _context_clues_to_json(clues: Sequence[ContextClue]) -> str:
+    payload = [
+        {
+            "id": clue.identifier,
+            "path": clue.path,
+            "rationale": clue.rationale,
+            "content": clue.content,
+        }
+        for clue in clues
+    ]
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def _build_retrieval_prompt(task: TaskSpec, context_summary: ContextSummary) -> str:
+    selected_section = _format_selected_task_section(task)
+    clues_json = _context_clues_to_json(context_summary.context_clues)
+    instructions = (
+        "# Retrieval brief stage\n"
+        "You will receive a context summary and candidate context clues extracted from the repository snapshot. "
+        "Select the minimal information required for the coding stage and produce a focused retrieval brief.\n\n"
+        "Return JSON with the following keys:\n"
+        "- `brief`: actionable summary to guide implementation (<= 200 words).\n"
+        "- `selected_context_ids`: array of clue ids to forward to the coding model.\n"
+        "- `focus_paths`: array of repository paths the coding model should inspect or modify.\n"
+        "- `handoff_notes`: optional additional guidance for the coding stage.\n"
+        "- `open_questions`: optional array of clarifications still needed."
+    )
+    summary_text = context_summary.summary or "(no summary provided)"
+    clues_block = clues_json if clues_json.strip() else "[]"
+    sections = [
+        instructions,
+        "\n## Selected Task (for reference)\n" + selected_section,
+        "\n## Context Summary\n" + summary_text,
+        "\n## Candidate Context Clues\n```json\n" + clues_block + "\n```",
+    ]
+    return "\n".join(sections)
+
+
+def _format_context_clues(clues: Sequence[ContextClue]) -> str:
+    if not clues:
+        return "_No contextual excerpts were selected._"
+    parts: List[str] = []
+    for clue in clues:
+        header = f"### {clue.identifier} — {clue.path or 'context'}"
+        rationale = clue.rationale or "(no rationale provided)"
+        excerpt = clue.content or "(no excerpt provided)"
+        parts.extend(
+            [
+                header,
+                f"*Why it matters:* {rationale}",
+                "```text",
+                excerpt,
+                "```",
+            ]
+        )
+    return "\n".join(parts)
+
+
+def _select_context_clues(
+    context_summary: ContextSummary, retrieval_brief: RetrievalBrief
+) -> List[ContextClue]:
+    if not context_summary.context_clues:
+        return []
+    if not retrieval_brief.selected_context_ids:
+        return list(context_summary.context_clues)
+    selected_ids = set(retrieval_brief.selected_context_ids)
+    selected = [
+        clue for clue in context_summary.context_clues if clue.identifier in selected_ids
+    ]
+    return selected or list(context_summary.context_clues)
+
+
+def _build_execution_prompt(
+    task: TaskSpec,
+    retrieval_brief: RetrievalBrief,
+    context_clues: Sequence[ContextClue],
+) -> str:
+    selected_section = _format_selected_task_section(task)
+    context_section = _format_context_clues(context_clues)
+    focus_paths = retrieval_brief.focus_paths or []
+    focus_block = "\n".join(f"- {path}" for path in focus_paths) or "- (no specific paths provided)"
+    open_questions = retrieval_brief.open_questions or []
+    questions_block = (
+        "\n".join(f"- {question}" for question in open_questions)
+        if open_questions
+        else "- (none)"
+    )
+    instructions = (
+        "# Implementation stage\n"
+        "Use the retrieval brief and selected context to produce an actionable execution plan. "
+        "Respond with JSON containing `rationale`, `plan` (array of steps), `code_patches`, `new_tests`, `admin_requests`, and optional `notes`.\n"
+        "- `code_patches` entries must include `path` and full file `content`.\n"
+        "- Limit the scope to the provided focus paths unless the plan justifies additional files."
+    )
+    sections = [
+        instructions,
+        "\n## Selected Task\n" + selected_section,
+        "\n## Retrieval Brief\n" + (retrieval_brief.brief or "(no brief provided)"),
+        "\n## Focus Paths\n" + focus_block,
+        "\n## Handoff Notes\n" + (retrieval_brief.handoff_notes or "(none)"),
+        "\n## Open Questions\n" + questions_block,
+        "\n## Context Excerpts\n" + context_section,
+    ]
+    return "\n".join(sections)
 
 
 # ---------------- Checks ----------------
@@ -637,20 +606,30 @@ def main() -> int:
     pr_body = metadata["pr_body"]
 
     plan_applied = False
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     try:
         system = (ROOT / "agent/prompts/system.md").read_text(encoding="utf-8")
-        user = _build_user_prompt(task_prompt, primary_task)
 
-        plan = call_code_model(system, user)
-        if isinstance(plan, dict) and (plan.get("code_patches") or plan.get("new_tests")):
+        context_prompt = _build_context_summary_prompt(task_prompt, primary_task)
+        context_summary = run_context_summary(client, system_prompt=system, user_prompt=context_prompt)
+
+        retrieval_prompt = _build_retrieval_prompt(primary_task, context_summary)
+        retrieval_brief = run_retrieval_brief(client, system_prompt=system, user_prompt=retrieval_prompt)
+
+        selected_clues = _select_context_clues(context_summary, retrieval_brief)
+        execution_prompt = _build_execution_prompt(primary_task, retrieval_brief, selected_clues)
+        execution_plan = run_execution_plan(client, system_prompt=system, user_prompt=execution_prompt)
+
+        if execution_plan.has_changes():
             branch_name = _checkout_branch_for_task(branch_name)
-            apply_plan(plan)
+            apply_plan(execution_plan)
             plan_applied = True
         else:
             append_event(
                 level="warning",
                 source="orchestrator",
                 message="LLM produced no actionable patches; leaving repository unchanged.",
+                details={"stage": "execution_plan"},
             )
             return 0
     except Exception as e:

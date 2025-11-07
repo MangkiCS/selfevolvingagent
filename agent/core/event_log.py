@@ -81,3 +81,41 @@ def clear_events(path: Optional[pathlib.Path] = None) -> None:
     except OSError:
         # Ignore removal errors to avoid blocking the orchestrator.
         pass
+
+
+def log_stage_transition(
+    stage: str,
+    status: str,
+    *,
+    metadata: Optional[Dict[str, Any]] = None,
+    level: str = "info",
+) -> Dict[str, Any]:
+    """Record a pipeline stage transition."""
+
+    details: Dict[str, Any] = {"stage": stage, "status": status}
+    if metadata:
+        details.update(metadata)
+    return append_event(
+        level=level,
+        source="pipeline",
+        message="stage_transition",
+        details=details,
+    )
+
+
+def log_token_usage(
+    stage: str,
+    *,
+    usage: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Record token usage for a stage."""
+
+    details: Dict[str, Any] = {"stage": stage}
+    if usage:
+        details.update({k: v for k, v in usage.items() if k in {"input_tokens", "output_tokens", "total_tokens"}})
+    return append_event(
+        level="info",
+        source="pipeline",
+        message="token_usage",
+        details=details,
+    )
