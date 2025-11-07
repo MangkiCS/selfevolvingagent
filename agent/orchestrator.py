@@ -13,7 +13,7 @@ import pathlib
 import subprocess
 import sys
 import time
-from typing import Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 from openai import OpenAI
 
@@ -24,10 +24,15 @@ from agent.core.task_context import (
     TaskPrompt,
     load_task_prompt,
 )
+from agent.core.task_loader import TaskSpecLoadingError, load_task_specs
+from agent.core.taskspec import TaskSpec
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 AUTO_BRANCH_PREFIX = "auto/"
 AUTO_LABEL = "auto"
+
+# Cached catalogue populated during startup for downstream task selection.
+_TASK_CATALOG: Dict[str, TaskSpec] = {}
 
 # Snapshot-Parameter (sparsam halten -> Kosten & Tokens)
 SNAPSHOT_MAX_FILES = 40
@@ -278,6 +283,22 @@ def apply_plan(plan: dict) -> None:
         write(t["path"], t["content"])
 
 
+def load_available_tasks(tasks_dir: pathlib.Path | str = DEFAULT_TASKS_DIR) -> List[TaskSpec]:
+    """Load TaskSpec definitions from *tasks_dir* and cache them for selection."""
+
+    path = pathlib.Path(tasks_dir)
+    try:
+        specs = load_task_specs(path)
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise TaskContextError(path, str(exc)) from exc
+    except TaskSpecLoadingError as exc:
+        raise TaskContextError(exc.path, str(exc)) from exc
+
+    _TASK_CATALOG.clear()
+    _TASK_CATALOG.update({spec.task_id: spec for spec in specs})
+    return specs
+
+
 def _prepare_task_prompt() -> Optional[TaskPrompt]:
     try:
         return load_task_prompt(DEFAULT_TASKS_DIR)
@@ -401,6 +422,18 @@ def create_pull_request(branch: str, *, title: str, body: str) -> Optional[int]:
 def main() -> int:
     ensure_git_identity()
 
+    try:
+        load_available_tasks(DEFAULT_TASKS_DIR)
+    except TaskContextError as exc:
+        append_event(
+            level="error",
+            source="orchestrator",
+            message="Failed to load task specifications",
+            details={"error": str(exc), "path": str(exc.path)},
+        )
+        print(f"Failed to load task specifications: {exc}", file=sys.stderr)
+        return 1
+
     task_prompt = _prepare_task_prompt()
     if task_prompt is None:
         return 1
@@ -420,7 +453,7 @@ def main() -> int:
         )
         return 0
 
-    primary_task = task_prompt.ready[0]
+    primary_task = _TASK_CATALOG.get(task_prompt.ready[0].task_id, task_prompt.ready[0])
     plan_applied = False
     branch: Optional[str] = None
     try:
