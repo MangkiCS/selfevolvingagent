@@ -11,10 +11,12 @@ from openai import OpenAI
 
 from agent.core.event_log import (
     append_event,
+    log_quota_snapshot,
     log_stage_transition,
     log_token_usage,
 )
 from agent.core.vector_store import QueryResult, VectorStore
+from agent.core.openai_quota import capture_quota_snapshot
 
 
 DEFAULT_MODEL = "gpt-5-codex"
@@ -331,6 +333,28 @@ def _call_model_json(
     last_error: Optional[Exception] = None
     attempt_count = 0
     current_model = model
+
+    stage_label = stage or "unknown"
+    try:
+        quota_snapshot = capture_quota_snapshot(
+            client,
+            request_timeout=request_timeout,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging only
+        append_event(
+            level="warning",
+            source="openai_quota",
+            message="snapshot_failed",
+            details={"stage": stage_label, "error": str(exc)},
+        )
+        quota_snapshot = None
+
+    if quota_snapshot and not quota_snapshot.is_empty():
+        log_quota_snapshot(
+            stage_label,
+            usage=quota_snapshot.usage,
+            limits=quota_snapshot.limits,
+        )
     for attempt in range(1, max_retries + 1):
         try:
             attempt_count = attempt
