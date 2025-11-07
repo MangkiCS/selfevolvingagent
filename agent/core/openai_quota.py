@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import json
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional
 
@@ -59,6 +60,36 @@ def capture_quota_snapshot(
         limits = _summarise_limits_payload(limits)
 
     return QuotaSnapshot(usage=usage, limits=limits)
+
+
+def format_quota_snapshot_for_console(
+    stage: str,
+    snapshot: QuotaSnapshot,
+) -> Optional[str]:
+    """Render a quota snapshot as a concise, single-line message.
+
+    The message is suitable for writing to stdout so that operators can see
+    quota/usage information without having to open the persisted event log.
+    """
+
+    if snapshot.is_empty():
+        return None
+
+    payload: Dict[str, Any] = {}
+    if snapshot.usage:
+        payload["usage"] = snapshot.usage
+    if snapshot.limits:
+        payload["limits"] = snapshot.limits
+
+    if not payload:
+        return None
+
+    stage_label = stage.strip() if stage else ""
+    if not stage_label:
+        stage_label = "unknown"
+
+    compact = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return f"[quota:{stage_label}] {compact}"
 
 
 def _safe_get_json(

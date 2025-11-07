@@ -16,7 +16,7 @@ from agent.core.event_log import (
     log_token_usage,
 )
 from agent.core.vector_store import QueryResult, VectorStore
-from agent.core.openai_quota import capture_quota_snapshot
+from agent.core.openai_quota import capture_quota_snapshot, format_quota_snapshot_for_console
 
 
 DEFAULT_MODEL = "gpt-5-codex"
@@ -355,6 +355,9 @@ def _call_model_json(
             usage=quota_snapshot.usage,
             limits=quota_snapshot.limits,
         )
+        console_summary = format_quota_snapshot_for_console(stage_label, quota_snapshot)
+        if console_summary:
+            print(console_summary)
     for attempt in range(1, max_retries + 1):
         try:
             attempt_count = attempt
