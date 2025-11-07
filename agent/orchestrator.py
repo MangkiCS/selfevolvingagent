@@ -13,7 +13,7 @@ import pathlib
 import re
 import subprocess
 import sys
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence
 
 from openai import OpenAI
 
@@ -34,15 +34,19 @@ from agent.core.task_context import (
     load_task_prompt,
 )
 from agent.core.task_loader import TaskSpecLoadingError, load_task_specs
-from agent.core.taskspec import TaskSpec
 from agent.core.task_selection import select_next_task, summarise_tasks_for_prompt
+from agent.core.taskspec import TaskSpec
+from agent.core.vector_store import QueryResult, VectorStore, VectorStoreError
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 AUTO_BRANCH_PREFIX = "auto/"
 AUTO_LABEL = "auto"
+VECTOR_STORE_PATH = ROOT / "state" / "vector_store.json"
+MAX_RETRIEVED_SNIPPETS = 3
 
 # Cached catalogue populated during startup for downstream task selection.
 _TASK_CATALOG: Dict[str, TaskSpec] = {}
+_VECTOR_STORE: Optional[VectorStore] = None
 
 # Optional override for the next auto branch name.
 _PREFERRED_BRANCH_NAME: Optional[str] = None
@@ -164,6 +168,28 @@ def build_repo_snapshot(
 
 
 # ---------------- OpenAI (Responses API) ----------------
+def _get_vector_store() -> VectorStore:
+    global _VECTOR_STORE
+    if _VECTOR_STORE is None:
+        try:
+            _VECTOR_STORE = VectorStore(VECTOR_STORE_PATH)
+        except VectorStoreError as exc:
+            append_event(
+                level="warning",
+                source="vector_store",
+                message="Failed to load existing vector store; starting fresh.",
+                details={"error": str(exc)},
+            )
+            backup = VECTOR_STORE_PATH.with_suffix(".invalid.json")
+            try:
+                if VECTOR_STORE_PATH.exists():
+                    VECTOR_STORE_PATH.replace(backup)
+            except OSError:
+                pass
+            _VECTOR_STORE = VectorStore(VECTOR_STORE_PATH)
+    return _VECTOR_STORE
+
+
 def apply_plan(plan: ExecutionPlan) -> None:
     """Schreibt vom Modell gelieferte Patches/Tests ins Repo."""
 
@@ -382,6 +408,44 @@ def _context_clues_to_json(clues: Sequence[ContextClue]) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
+def _load_prompt_fragment(name: str) -> str:
+    path = ROOT / "agent" / "prompts" / name
+    return path.read_text(encoding="utf-8")
+
+
+def _render_fragment(template: str, **params: str) -> str:
+    rendered = template
+    for key, value in params.items():
+        rendered = rendered.replace(f"%%{key}%%", value)
+    return rendered
+
+
+def _format_retrieved_snippets(snippets: Iterable[QueryResult]) -> str:
+    snippets = list(snippets)
+    section_template = _load_prompt_fragment("retrieved_snippet_section.md")
+    if not snippets:
+        return _render_fragment(section_template, retrieved_snippets="Keine zusätzlichen Snippets verfügbar.")
+
+    item_template = _load_prompt_fragment("retrieved_snippet_item.md")
+    rendered_items: List[str] = []
+    for index, snippet in enumerate(snippets, start=1):
+        metadata = snippet.metadata or {}
+        name = metadata.get("title") or metadata.get("path") or snippet.snippet_id
+        snippet_content = snippet.content.strip() or "(kein Inhalt)"
+        rendered_items.append(
+            _render_fragment(
+                item_template,
+                ordinal=f"Snippet {index}",
+                name=name,
+                path=metadata.get("path") or "(unbekannter Pfad)",
+                score=f"{snippet.score:.3f}",
+                content=snippet_content,
+            )
+        )
+    block = "\n\n".join(rendered_items)
+    return _render_fragment(section_template, retrieved_snippets=block)
+
+
 def _build_retrieval_prompt(task: TaskSpec, context_summary: ContextSummary) -> str:
     selected_section = _format_selected_task_section(task)
     clues_json = _context_clues_to_json(context_summary.context_clues)
@@ -448,6 +512,7 @@ def _build_execution_prompt(
 ) -> str:
     selected_section = _format_selected_task_section(task)
     context_section = _format_context_clues(context_clues)
+    snippet_section = _format_retrieved_snippets(retrieval_brief.retrieved_snippets)
     focus_paths = retrieval_brief.focus_paths or []
     focus_block = "\n".join(f"- {path}" for path in focus_paths) or "- (no specific paths provided)"
     open_questions = retrieval_brief.open_questions or []
@@ -467,6 +532,7 @@ def _build_execution_prompt(
         instructions,
         "\n## Selected Task\n" + selected_section,
         "\n## Retrieval Brief\n" + (retrieval_brief.brief or "(no brief provided)"),
+        "\n## Retrieved Snippets\n" + snippet_section,
         "\n## Focus Paths\n" + focus_block,
         "\n## Handoff Notes\n" + (retrieval_brief.handoff_notes or "(none)"),
         "\n## Open Questions\n" + questions_block,
@@ -606,6 +672,7 @@ def main() -> int:
     pr_body = metadata["pr_body"]
 
     plan_applied = False
+    vector_store = _get_vector_store()
     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     try:
         system = (ROOT / "agent/prompts/system.md").read_text(encoding="utf-8")
@@ -614,7 +681,14 @@ def main() -> int:
         context_summary = run_context_summary(client, system_prompt=system, user_prompt=context_prompt)
 
         retrieval_prompt = _build_retrieval_prompt(primary_task, context_summary)
-        retrieval_brief = run_retrieval_brief(client, system_prompt=system, user_prompt=retrieval_prompt)
+        retrieval_brief = run_retrieval_brief(
+            client,
+            system_prompt=system,
+            user_prompt=retrieval_prompt,
+            vector_store=vector_store,
+            query_text=context_summary.summary,
+            max_snippets=MAX_RETRIEVED_SNIPPETS,
+        )
 
         selected_clues = _select_context_clues(context_summary, retrieval_brief)
         execution_prompt = _build_execution_prompt(primary_task, retrieval_brief, selected_clues)

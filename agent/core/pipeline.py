@@ -14,6 +14,7 @@ from agent.core.event_log import (
     log_stage_transition,
     log_token_usage,
 )
+from agent.core.vector_store import QueryResult, VectorStore
 
 
 DEFAULT_MODEL = "gpt-5-codex"
@@ -71,6 +72,7 @@ class RetrievalBrief:
     focus_paths: List[str] = field(default_factory=list)
     handoff_notes: str = ""
     open_questions: List[str] = field(default_factory=list)
+    retrieved_snippets: List[QueryResult] = field(default_factory=list)
     usage: Optional[StageUsage] = None
     raw: Optional[Dict[str, Any]] = None
 
@@ -343,6 +345,9 @@ def run_retrieval_brief(
     *,
     system_prompt: str,
     user_prompt: str,
+    vector_store: Optional[VectorStore] = None,
+    query_text: Optional[str] = None,
+    max_snippets: int = 3,
 ) -> RetrievalBrief:
     stage_name = "retrieval_brief"
     log_stage_transition(stage_name, "start")
@@ -354,12 +359,27 @@ def run_retrieval_brief(
     focus_paths = _ensure_str_list(payload.get("focus_paths") or payload.get("target_files"))
     handoff_notes = _normalise_text(payload.get("handoff_notes"))
     open_questions = _ensure_str_list(payload.get("open_questions"))
+    snippets: List[QueryResult] = []
+    search_basis = query_text or brief
+    if vector_store and search_basis:
+        try:
+            snippets = vector_store.query_text(search_basis, top_k=max_snippets)
+        except Exception as exc:  # pragma: no cover - defensive path
+            append_event(
+                level="warning",
+                source="pipeline",
+                message="Vector store query failed",
+                details={"error": str(exc)},
+            )
+            snippets = []
+
     result = RetrievalBrief(
         brief=brief,
         selected_context_ids=selected_ids,
         focus_paths=focus_paths,
         handoff_notes=handoff_notes,
         open_questions=open_questions,
+        retrieved_snippets=snippets,
         usage=usage,
         raw=payload,
     )
