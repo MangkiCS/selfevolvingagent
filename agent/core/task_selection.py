@@ -8,11 +8,23 @@ rules.
 from __future__ import annotations
 
 from collections.abc import Collection, Iterable, Sequence
+from pathlib import Path
 from typing import Final
 
 from agent.core.taskspec import TaskPriority, TaskSpec
+from agent.core.vector_indexing import (
+    DEFAULT_CHUNK_OVERLAP,
+    DEFAULT_CHUNK_SIZE,
+    index_paths,
+)
+from agent.core.vector_store import VectorStore
 
-__all__ = ["order_by_priority", "select_next_task", "summarise_tasks_for_prompt"]
+__all__ = [
+    "order_by_priority",
+    "refresh_vector_cache",
+    "select_next_task",
+    "summarise_tasks_for_prompt",
+]
 
 _PRIORITY_ORDER: Final[dict[TaskPriority, int]] = {
     "critical": 0,
@@ -99,3 +111,31 @@ def summarise_tasks_for_prompt(
             deps = ", ".join(spec.dependencies)
             lines.append(f"  * Dependencies: {deps}")
     return "\n".join(lines)
+
+
+def refresh_vector_cache(
+    vector_store: VectorStore,
+    *,
+    touched_paths: Iterable[str],
+    root: Path | None = None,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+    overlap: int = DEFAULT_CHUNK_OVERLAP,
+) -> list[str]:
+    """Refresh embeddings for ``docs/`` and ``tests/`` files that were modified."""
+
+    base = root or Path(__file__).resolve().parents[2]
+    candidates = []
+    for raw in touched_paths:
+        path = Path(raw)
+        if not path.is_absolute():
+            path = base / path
+        candidates.append(path)
+
+    indexed = index_paths(
+        vector_store,
+        candidates,
+        root=base,
+        chunk_size=chunk_size,
+        overlap=overlap,
+    )
+    return sorted(indexed)

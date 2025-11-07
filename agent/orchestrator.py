@@ -13,7 +13,7 @@ import pathlib
 import re
 import subprocess
 import sys
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from openai import OpenAI
 
@@ -34,7 +34,11 @@ from agent.core.task_context import (
     load_task_prompt,
 )
 from agent.core.task_loader import TaskSpecLoadingError, load_task_specs
-from agent.core.task_selection import select_next_task, summarise_tasks_for_prompt
+from agent.core.task_selection import (
+    refresh_vector_cache,
+    select_next_task,
+    summarise_tasks_for_prompt,
+)
 from agent.core.taskspec import TaskSpec
 from agent.core.vector_store import QueryResult, VectorStore, VectorStoreError
 
@@ -190,13 +194,31 @@ def _get_vector_store() -> VectorStore:
     return _VECTOR_STORE
 
 
-def apply_plan(plan: ExecutionPlan) -> None:
+def _maybe_create_openai_client() -> Optional[OpenAI]:
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        append_event(
+            level="warning",
+            source="orchestrator",
+            message="OPENAI_API_KEY missing; skipping live model calls.",
+        )
+        return None
+    return OpenAI(api_key=api_key)
+
+
+def apply_plan(plan: ExecutionPlan) -> list[str]:
     """Schreibt vom Modell gelieferte Patches/Tests ins Repo."""
 
+    touched: list[str] = []
     for patch in plan.code_patches:
-        write(patch["path"], patch["content"])
+        path = patch["path"]
+        write(path, patch["content"])
+        touched.append(path)
     for test in plan.new_tests:
-        write(test["path"], test["content"])
+        path = test["path"]
+        write(path, test["content"])
+        touched.append(path)
+    return touched
 
 
 def load_available_tasks() -> List[TaskSpec]:
@@ -530,7 +552,7 @@ def _build_execution_prompt(
     )
     sections = [
         instructions,
-        "\n## Selected Task\n" + selected_section,
+        "\n## Selected Task for Execution\n" + selected_section,
         "\n## Retrieval Brief\n" + (retrieval_brief.brief or "(no brief provided)"),
         "\n## Retrieved Snippets\n" + snippet_section,
         "\n## Focus Paths\n" + focus_block,
@@ -539,6 +561,39 @@ def _build_execution_prompt(
         "\n## Context Excerpts\n" + context_section,
     ]
     return "\n".join(sections)
+
+
+def call_code_model(
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    client: OpenAI | None = None,
+) -> Dict[str, Any]:
+    """Execute the code-generation stage and return a serialisable payload."""
+
+    runner = client or OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    execution_plan = run_execution_plan(runner, system_prompt=system_prompt, user_prompt=user_prompt)
+    payload = execution_plan.to_dict()
+    if execution_plan.notes:
+        payload.setdefault("notes", execution_plan.notes)
+    return payload
+
+
+def _coerce_execution_plan(payload: ExecutionPlan | Dict[str, Any]) -> ExecutionPlan:
+    """Normalise a raw payload or ExecutionPlan instance into ExecutionPlan."""
+
+    if isinstance(payload, ExecutionPlan):
+        return payload
+    if not isinstance(payload, dict):
+        raise TypeError("Execution payload must be an ExecutionPlan or mapping.")
+    return ExecutionPlan(
+        rationale=str(payload.get("rationale", "")),
+        plan=list(payload.get("plan", [])),
+        code_patches=list(payload.get("code_patches", [])),
+        new_tests=list(payload.get("new_tests", [])),
+        admin_requests=list(payload.get("admin_requests", [])),
+        notes=str(payload.get("notes", "")),
+    )
 
 
 # ---------------- Checks ----------------
@@ -673,30 +728,55 @@ def main() -> int:
 
     plan_applied = False
     vector_store = _get_vector_store()
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    client = _maybe_create_openai_client()
     try:
         system = (ROOT / "agent/prompts/system.md").read_text(encoding="utf-8")
 
-        context_prompt = _build_context_summary_prompt(task_prompt, primary_task)
-        context_summary = run_context_summary(client, system_prompt=system, user_prompt=context_prompt)
+        if client is None:
+            context_summary = ContextSummary(summary=task_prompt.prompt)
+            retrieval_brief = RetrievalBrief(
+                brief="",
+                selected_context_ids=[],
+                focus_paths=list(primary_task.context),
+                handoff_notes="",
+                open_questions=[],
+                retrieved_snippets=[],
+            )
+        else:
+            context_prompt = _build_context_summary_prompt(task_prompt, primary_task)
+            context_summary = run_context_summary(
+                client, system_prompt=system, user_prompt=context_prompt
+            )
 
-        retrieval_prompt = _build_retrieval_prompt(primary_task, context_summary)
-        retrieval_brief = run_retrieval_brief(
-            client,
-            system_prompt=system,
-            user_prompt=retrieval_prompt,
-            vector_store=vector_store,
-            query_text=context_summary.summary,
-            max_snippets=MAX_RETRIEVED_SNIPPETS,
-        )
+            retrieval_prompt = _build_retrieval_prompt(primary_task, context_summary)
+            retrieval_brief = run_retrieval_brief(
+                client,
+                system_prompt=system,
+                user_prompt=retrieval_prompt,
+                vector_store=vector_store,
+                query_text=context_summary.summary,
+                max_snippets=MAX_RETRIEVED_SNIPPETS,
+            )
 
         selected_clues = _select_context_clues(context_summary, retrieval_brief)
         execution_prompt = _build_execution_prompt(primary_task, retrieval_brief, selected_clues)
-        execution_plan = run_execution_plan(client, system_prompt=system, user_prompt=execution_prompt)
+        if client is None:
+            execution_payload = call_code_model(system, execution_prompt)
+        else:
+            execution_payload = call_code_model(system, execution_prompt, client=client)
+        execution_plan = _coerce_execution_plan(execution_payload)
 
         if execution_plan.has_changes():
             branch_name = _checkout_branch_for_task(branch_name)
-            apply_plan(execution_plan)
+            touched_paths = apply_plan(execution_plan)
+            refreshed = refresh_vector_cache(vector_store, touched_paths=touched_paths)
+            if refreshed:
+                append_event(
+                    level="info",
+                    source="vector_store",
+                    message="Refreshed embeddings for updated docs/tests files.",
+                    details={"paths": refreshed},
+                )
             plan_applied = True
         else:
             append_event(

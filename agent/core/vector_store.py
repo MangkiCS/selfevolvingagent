@@ -291,6 +291,31 @@ class VectorStore:
         self._faiss_dirty = False
 
 
+    def delete_where(self, predicate: Callable[[VectorRecord], bool]) -> int:
+        """Delete records matching *predicate*, returning the number removed."""
+
+        to_delete = [snippet_id for snippet_id, record in self._records.items() if predicate(record)]
+        for snippet_id in to_delete:
+            del self._records[snippet_id]
+        if to_delete:
+            self._dirty = True
+            self._faiss_dirty = True
+        return len(to_delete)
+
+    def delete_by_path(self, path: str) -> int:
+        """Remove all snippets whose ``metadata['path']`` matches *path*.
+
+        Args:
+            path: Repository-relative path using forward slashes (``/``).
+
+        Returns:
+            The number of snippets removed from the store.
+        """
+
+        normalised = path.replace(os.sep, "/")
+        return self.delete_where(lambda record: record.metadata.get("path") == normalised)
+
+
 __all__ = [
     "QueryResult",
     "VectorRecord",
