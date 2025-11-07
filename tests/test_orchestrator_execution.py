@@ -84,7 +84,7 @@ def test_main_executes_task_without_placeholder_artifacts(monkeypatch):
 
     task_prompt = _make_task_prompt(spec)
 
-    def fake_load_available_tasks(_directory=None):
+    def fake_load_available_tasks():
         orchestrator._TASK_CATALOG.clear()
         orchestrator._TASK_CATALOG[spec.task_id] = spec
         return [spec]
@@ -143,7 +143,7 @@ def test_main_skips_when_model_returns_no_plan(monkeypatch):
 
     task_prompt = _make_task_prompt(spec)
 
-    monkeypatch.setattr(orchestrator, "load_available_tasks", lambda _dir=None: [spec])
+    monkeypatch.setattr(orchestrator, "load_available_tasks", lambda: [spec])
     monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
     monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "_snapshot_")
