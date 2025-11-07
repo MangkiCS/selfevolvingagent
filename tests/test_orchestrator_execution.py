@@ -110,7 +110,7 @@ def test_main_executes_task_without_placeholder_artifacts(monkeypatch):
         lambda branch, title, body: prs.append((branch, title, body)),
     )
 
-    def fake_call_code_model(system: str, user: str) -> dict:
+    def fake_call_code_model(system: str, user: str, *, client=None) -> dict:
         assert "## Selected Task for Execution" in user
         assert spec.summary in user
         return {
@@ -160,7 +160,7 @@ def test_main_skips_when_model_returns_no_plan(monkeypatch):
     writes: list[tuple[str, str]] = []
     monkeypatch.setattr(orchestrator, "write", lambda path, content: writes.append((path, content)))
 
-    monkeypatch.setattr(orchestrator, "call_code_model", lambda system, user: {})
+    monkeypatch.setattr(orchestrator, "call_code_model", lambda system, user, *, client=None: {})
 
     result = orchestrator.main()
     assert result == 0
@@ -189,7 +189,11 @@ def test_admin_requests_are_logged_and_announced(monkeypatch, capsys):
         return {"details": {"requests": list(requests)}}
 
     monkeypatch.setattr(orchestrator, "log_admin_requests", fake_log_admin_requests)
-    monkeypatch.setattr(orchestrator, "call_code_model", lambda system, user: {"admin_requests": [{"summary": "Need API key"}]})
+    monkeypatch.setattr(
+        orchestrator,
+        "call_code_model",
+        lambda system, user, *, client=None: {"admin_requests": [{"summary": "Need API key"}]},
+    )
 
     result = orchestrator.main()
     assert result == 0
@@ -214,7 +218,7 @@ def test_main_surfaces_stage_metadata_on_llm_failure(monkeypatch, capsys):
     monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
     monkeypatch.setattr(orchestrator, "_get_vector_store", lambda: None)
-    monkeypatch.setattr(orchestrator, "_maybe_create_openai_client", lambda: None)
+    monkeypatch.setattr(orchestrator, "_maybe_create_llm_client", lambda: None)
 
     events: list[dict[str, object]] = []
 
@@ -270,7 +274,7 @@ def test_main_does_not_checkout_previous_branch_when_model_fails(monkeypatch):
     monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
     monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "snapshot")
-    monkeypatch.setattr(orchestrator, "_maybe_create_openai_client", lambda: None)
+    monkeypatch.setattr(orchestrator, "_maybe_create_llm_client", lambda: None)
 
     checkout_commands: list[list[str]] = []
 

@@ -7,20 +7,19 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from openai import OpenAI
-
 from agent.core.event_log import (
     append_event,
     log_quota_snapshot,
     log_stage_transition,
     log_token_usage,
 )
+from agent.core.llm_client import LLMClient
 from agent.core.vector_store import QueryResult, VectorStore
 from agent.core.openai_quota import capture_quota_snapshot, format_quota_snapshot_for_console
 
 
-DEFAULT_MODEL = "gpt-5-codex"
-FALLBACK_MODEL = "gpt-5"
+DEFAULT_MODEL = "scaleway/deepseek-r1-distill-llama-70b"
+FALLBACK_MODEL = "scaleway/llama-3-70b-instruct"
 DEFAULT_API_TIMEOUT = 1800.0
 DEFAULT_API_MAX_RETRIES = 2
 DEFAULT_API_POLL_INTERVAL = 1.5
@@ -318,7 +317,7 @@ def _extract_usage(response: Any) -> StageUsage:
 
 
 def _call_model_json(
-    client: OpenAI,
+    client: LLMClient,
     *,
     system_prompt: str,
     user_prompt: str,
@@ -335,19 +334,20 @@ def _call_model_json(
     current_model = model
 
     stage_label = stage or "unknown"
-    try:
-        quota_snapshot = capture_quota_snapshot(
-            client,
-            request_timeout=request_timeout,
-        )
-    except Exception as exc:  # pragma: no cover - defensive logging only
-        append_event(
-            level="warning",
-            source="openai_quota",
-            message="snapshot_failed",
-            details={"stage": stage_label, "error": str(exc)},
-        )
-        quota_snapshot = None
+    quota_snapshot = None
+    if client.supports_quota:
+        try:
+            quota_snapshot = capture_quota_snapshot(
+                client.client,
+                request_timeout=request_timeout,
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging only
+            append_event(
+                level="warning",
+                source="openai_quota",
+                message="snapshot_failed",
+                details={"stage": stage_label, "error": str(exc)},
+            )
 
     if quota_snapshot and not quota_snapshot.is_empty():
         log_quota_snapshot(
@@ -493,7 +493,7 @@ def _call_model_json(
 
 
 def run_context_summary(
-    client: OpenAI,
+    client: LLMClient,
     *,
     system_prompt: str,
     user_prompt: str,
@@ -520,7 +520,7 @@ def run_context_summary(
 
 
 def run_retrieval_brief(
-    client: OpenAI,
+    client: LLMClient,
     *,
     system_prompt: str,
     user_prompt: str,
@@ -618,7 +618,7 @@ def _normalise_admin_requests(value: Any) -> List[Dict[str, Any]]:
 
 
 def run_execution_plan(
-    client: OpenAI,
+    client: LLMClient,
     *,
     system_prompt: str,
     user_prompt: str,

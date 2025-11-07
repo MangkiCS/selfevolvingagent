@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 from agent.core import pipeline
+from agent.core.llm_client import LLMClient
 
 
 class PipelineModelCallTests(unittest.TestCase):
@@ -41,7 +42,7 @@ class PipelineModelCallTests(unittest.TestCase):
         with mock.patch.object(pipeline, "append_event", side_effect=fake_append_event):
             with self.assertRaises(pipeline.LLMCallError):
                 pipeline._call_model_json(  # type: ignore[protected-access]
-                    DummyClient(),
+                    LLMClient(provider="test", client=DummyClient(), supports_quota=False),
                     system_prompt="sys",
                     user_prompt="user",
                     stage="execution_plan",
@@ -93,7 +94,7 @@ class PipelineModelCallTests(unittest.TestCase):
             with mock.patch.object(pipeline, "append_event", side_effect=fake_append_event):
                 with self.assertRaises(pipeline.LLMCallError):
                     pipeline._call_model_json(  # type: ignore[protected-access]
-                        DummyClient(),
+                        LLMClient(provider="test", client=DummyClient(), supports_quota=False),
                         system_prompt="sys",
                         user_prompt="user",
                         stage="context_summary",
@@ -140,7 +141,7 @@ class PipelineModelCallTests(unittest.TestCase):
 
         with mock.patch.object(pipeline, "append_event", side_effect=fake_append_event):
             payload, usage = pipeline._call_model_json(  # type: ignore[protected-access]
-                DummyClient(),
+                LLMClient(provider="test", client=DummyClient(), supports_quota=False),
                 system_prompt="sys",
                 user_prompt="user",
                 stage="retrieval_brief",

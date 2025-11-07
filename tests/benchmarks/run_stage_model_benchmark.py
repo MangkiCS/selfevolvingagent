@@ -9,8 +9,6 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from openai import OpenAI
-
 from agent.core.pipeline import (
     DEFAULT_MODEL,
     ExecutionPlan,
@@ -20,6 +18,7 @@ from agent.core.pipeline import (
     run_execution_plan,
     run_retrieval_brief,
 )
+from agent.core.llm_client import create_llm_client
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PROMPTS_PATH = ROOT / "tests" / "benchmarks" / "stage_prompts.json"
@@ -112,7 +111,9 @@ def benchmark(
     output_path: Optional[Path],
 ) -> Dict[str, Any]:
     prompts = _load_prompts(prompts_path)
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    client = create_llm_client()
+    if client is None:
+        raise RuntimeError("LLM client is not configured; set SCALEWAY_API_KEY or OPENAI_API_KEY")
 
     system_prompt = str(prompts.get("system", {}).get("prompt", ""))
     context_prompt = prompts.get("context_summary", {})
