@@ -284,10 +284,10 @@ def apply_plan(plan: dict) -> None:
         write(t["path"], t["content"])
 
 
-def load_available_tasks(tasks_dir: pathlib.Path | str = DEFAULT_TASKS_DIR) -> List[TaskSpec]:
-    """Load TaskSpec definitions from *tasks_dir* and cache them for selection."""
+def load_available_tasks() -> List[TaskSpec]:
+    """Load TaskSpec definitions from the default repository tasks directory."""
 
-    path = pathlib.Path(tasks_dir)
+    path = pathlib.Path(DEFAULT_TASKS_DIR)
     try:
         specs = load_task_specs(path)
     except (FileNotFoundError, NotADirectoryError) as exc:
@@ -504,7 +504,7 @@ def main() -> int:
     ensure_git_identity()
 
     try:
-        load_available_tasks(DEFAULT_TASKS_DIR)
+        load_available_tasks()
     except TaskContextError as exc:
         append_event(
             level="error",
