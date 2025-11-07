@@ -164,3 +164,36 @@ def test_main_skips_when_model_returns_no_plan(monkeypatch):
     result = orchestrator.main()
     assert result == 0
     assert writes == []
+
+
+def test_admin_requests_are_logged_and_announced(monkeypatch, capsys):
+    spec = TaskSpec(
+        task_id="task/admin",
+        title="Surface admin requests",
+        summary="Ensure admin requests reach the event log and stdout.",
+        priority="high",
+    )
+
+    task_prompt = _make_task_prompt(spec)
+
+    monkeypatch.setattr(orchestrator, "load_available_tasks", lambda: [spec])
+    monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
+    monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
+    monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "snapshot")
+
+    recorded: list[list[dict[str, str]]] = []
+
+    def fake_log_admin_requests(requests):
+        recorded.append(list(requests))
+        return {"details": {"requests": list(requests)}}
+
+    monkeypatch.setattr(orchestrator, "log_admin_requests", fake_log_admin_requests)
+    monkeypatch.setattr(orchestrator, "call_code_model", lambda system, user: {"admin_requests": [{"summary": "Need API key"}]})
+
+    result = orchestrator.main()
+    assert result == 0
+    assert recorded == [[{"summary": "Need API key"}]]
+
+    stdout = capsys.readouterr().out
+    assert "Admin assistance requested" in stdout
+    assert "Need API key" in stdout

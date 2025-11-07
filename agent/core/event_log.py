@@ -5,7 +5,7 @@ import json
 import os
 import pathlib
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DEFAULT_LOG_PATH = ROOT / "docs" / "run_events.json"
@@ -70,6 +70,39 @@ def append_event(
     events = _truncate(events)
     log_path.write_text(json.dumps(events, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return entry
+
+
+def log_admin_requests(
+    requests: Sequence[Mapping[str, Any]] | Sequence[Any],
+    *,
+    path: Optional[pathlib.Path] = None,
+) -> Optional[Dict[str, Any]]:
+    """Persist admin assistance requests to the event log.
+
+    The model may emit arbitrary objects inside ``admin_requests``.  We only
+    record well-formed mapping entries to avoid polluting the log with
+    unexpected scalars while still surfacing the relevant metadata.
+    """
+
+    if not requests:
+        return None
+
+    normalised: List[Dict[str, Any]] = []
+    for item in requests:
+        if isinstance(item, Mapping):
+            normalised.append(dict(item))
+
+    if not normalised:
+        return None
+
+    details: Dict[str, Any] = {"count": len(normalised), "requests": normalised}
+    return append_event(
+        level="warning",
+        source="admin_channel",
+        message="admin_requests",
+        details=details,
+        path=path,
+    )
 
 
 def clear_events(path: Optional[pathlib.Path] = None) -> None:
