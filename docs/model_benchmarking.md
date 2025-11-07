@@ -5,6 +5,11 @@ orchestration stage. It builds on the configurable overrides introduced in
 `agent/core/pipeline.py` and the reusable benchmarking script located at
 `tests/benchmarks/run_stage_model_benchmark.py`.
 
+> **Note:** The orchestration pipeline now defaults to Scaleway's OpenAI-compatible
+> Generative API. To follow the OpenAI-focused workflow in this guide, set
+> `LLM_PROVIDER=openai` and provide an `OPENAI_API_KEY` before running the
+> benchmark script.
+
 ## Running the benchmark script
 
 1. Ensure you have a valid `OPENAI_API_KEY` in your environment.
@@ -42,6 +47,11 @@ orchestrator:
 export CONTEXT_MODEL=gpt-4.1-mini
 export RETRIEVAL_MODEL=gpt-4.1-mini
 export EXECUTION_MODEL=gpt-5-codex
+
+When using the default Scaleway provider, override these variables with model
+identifiers exposed by the Scaleway Generative API (for example,
+`scaleway/llama-3-8b-instruct`). The environment variables are shared across
+providers, allowing seamless switching via `LLM_PROVIDER`.
 ```
 
 If the specified model rejects a request due to quota limits, the pipeline

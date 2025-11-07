@@ -15,8 +15,6 @@ import subprocess
 import sys
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
-from openai import OpenAI
-
 from agent.core.event_log import append_event, log_admin_requests
 from agent.core.pipeline import (
     ContextClue,
@@ -28,6 +26,7 @@ from agent.core.pipeline import (
     run_execution_plan,
     run_retrieval_brief,
 )
+from agent.core.llm_client import LLMClient, create_llm_client
 from agent.core.task_context import (
     DEFAULT_TASKS_DIR,
     TaskContextError,
@@ -195,16 +194,15 @@ def _get_vector_store() -> VectorStore:
     return _VECTOR_STORE
 
 
-def _maybe_create_openai_client() -> Optional[OpenAI]:
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
+def _maybe_create_llm_client() -> Optional[LLMClient]:
+    client = create_llm_client()
+    if client is None:
         append_event(
             level="warning",
             source="orchestrator",
-            message="OPENAI_API_KEY missing; skipping live model calls.",
+            message="llm_client_unavailable",
         )
-        return None
-    return OpenAI(api_key=api_key)
+    return client
 
 
 def apply_plan(plan: ExecutionPlan) -> list[str]:
@@ -568,11 +566,18 @@ def call_code_model(
     system_prompt: str,
     user_prompt: str,
     *,
-    client: OpenAI | None = None,
+    client: LLMClient | None = None,
 ) -> Dict[str, Any]:
     """Execute the code-generation stage and return a serialisable payload."""
 
-    runner = client or OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    runner = client or create_llm_client()
+    if runner is None:
+        append_event(
+            level="warning",
+            source="orchestrator",
+            message="llm_client_unavailable_for_execution",
+        )
+        return {}
     execution_plan = run_execution_plan(runner, system_prompt=system_prompt, user_prompt=user_prompt)
     payload = execution_plan.to_dict()
     if execution_plan.notes:
@@ -730,7 +735,7 @@ def main() -> int:
     plan_applied = False
     branch_checked_out = False
     vector_store = _get_vector_store()
-    client = _maybe_create_openai_client()
+    client = _maybe_create_llm_client()
     try:
         system = (ROOT / "agent/prompts/system.md").read_text(encoding="utf-8")
 
@@ -762,10 +767,7 @@ def main() -> int:
 
         selected_clues = _select_context_clues(context_summary, retrieval_brief)
         execution_prompt = _build_execution_prompt(primary_task, retrieval_brief, selected_clues)
-        if client is None:
-            execution_payload = call_code_model(system, execution_prompt)
-        else:
-            execution_payload = call_code_model(system, execution_prompt, client=client)
+        execution_payload = call_code_model(system, execution_prompt, client=client)
         execution_plan = _coerce_execution_plan(execution_payload)
         _announce_admin_requests(execution_plan.admin_requests)
 
