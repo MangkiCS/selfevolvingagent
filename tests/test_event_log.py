@@ -48,6 +48,36 @@ class EventLogTests(unittest.TestCase):
         self.assertEqual(events[0]["message"], "m5")
         self.assertEqual(events[-1]["message"], f"m{event_log.MAX_EVENTS + 4}")
 
+    def test_log_admin_requests_records_valid_entries(self) -> None:
+        requests = [
+            {"type": "credentials", "message": "Need GitHub token"},
+            {"type": "policy", "summary": "Please confirm scope"},
+            "ignore-me",
+        ]
+
+        stored = event_log.log_admin_requests(requests)
+        self.assertIsNotNone(stored)
+        assert stored is not None  # for type checkers
+        details = stored.get("details", {})
+        self.assertEqual(details.get("count"), 2)
+        self.assertEqual(len(details.get("requests", [])), 2)
+
+        events = event_log.load_events(self.log_path)
+        self.assertEqual(len(events), 1)
+        event = events[0]
+        self.assertEqual(event["source"], "admin_channel")
+        self.assertEqual(event["message"], "admin_requests")
+
+    def test_log_admin_requests_ignores_empty_payload(self) -> None:
+        stored = event_log.log_admin_requests([])
+        self.assertIsNone(stored)
+
+        stored = event_log.log_admin_requests(["not-a-mapping"])
+        self.assertIsNone(stored)
+
+        events = event_log.load_events(self.log_path)
+        self.assertEqual(events, [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -13,11 +13,11 @@ import pathlib
 import re
 import subprocess
 import sys
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from openai import OpenAI
 
-from agent.core.event_log import append_event
+from agent.core.event_log import append_event, log_admin_requests
 from agent.core.pipeline import (
     ContextClue,
     ContextSummary,
@@ -765,6 +765,7 @@ def main() -> int:
         else:
             execution_payload = call_code_model(system, execution_prompt, client=client)
         execution_plan = _coerce_execution_plan(execution_payload)
+        _announce_admin_requests(execution_plan.admin_requests)
 
         if execution_plan.has_changes():
             branch_name = _checkout_branch_for_task(branch_name)
@@ -821,3 +822,39 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+# ---------------- Admin request helpers ----------------
+def _summarise_admin_request(request: Mapping[str, Any] | Any) -> str:
+    if not isinstance(request, Mapping):
+        return json.dumps(request, ensure_ascii=False)
+
+    for key in ("summary", "message", "reason", "description", "details"):
+        value = request.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    for key, value in request.items():
+        if isinstance(value, str) and value.strip():
+            return f"{key}: {value.strip()}"
+
+    return json.dumps(request, ensure_ascii=False)
+
+
+def _announce_admin_requests(requests: Sequence[Mapping[str, Any]] | Sequence[Any]) -> None:
+    if not requests:
+        return
+
+    stored = log_admin_requests(requests)
+    if not stored:
+        return
+
+    details = stored.get("details", {})
+    recorded = details.get("requests", [])
+    if not recorded:
+        return
+
+    print("\nAdmin assistance requested:")
+    for idx, request in enumerate(recorded, start=1):
+        summary = _summarise_admin_request(request)
+        print(f"  {idx}. {summary}")
+    print()
+
