@@ -727,6 +727,7 @@ def main() -> int:
     pr_body = metadata["pr_body"]
 
     plan_applied = False
+    branch_checked_out = False
     vector_store = _get_vector_store()
     client = _maybe_create_openai_client()
     try:
@@ -769,6 +770,7 @@ def main() -> int:
 
         if execution_plan.has_changes():
             branch_name = _checkout_branch_for_task(branch_name)
+            branch_checked_out = True
             touched_paths = apply_plan(execution_plan)
             refreshed = refresh_vector_cache(vector_store, touched_paths=touched_paths)
             if refreshed:
@@ -795,7 +797,8 @@ def main() -> int:
             details={"error": str(e)},
         )
         print(f"LLM call failed: {e}", file=sys.stderr)
-        sh(["git", "checkout", "-"], check=False)
+        if branch_checked_out:
+            sh(["git", "checkout", "-"], check=False)
         return 1
 
     if not plan_applied:
@@ -812,7 +815,8 @@ def main() -> int:
             details={"error": str(e)},
         )
         print(f"Tests fehlgeschlagen, kein Push/PR. Fehler: {e}", file=sys.stderr)
-        sh(["git", "checkout", "-"], check=False)
+        if branch_checked_out:
+            sh(["git", "checkout", "-"], check=False)
         return 1
 
     push_branch(branch_name)
