@@ -2,7 +2,7 @@
 
 ## Current Context
 - The repository contains an MVP automation orchestrator under `agent/orchestrator.py`.
-- The orchestrator currently falls back to rewriting sample hello-world modules when no targeted changes are supplied.
+- The orchestrator selects ready backlog items from TaskSpecs and skips execution when no actionable plan is returned.
 - Automated quality gates are currently disabled; apply judgement when validating work.
 - Documentation/backlog live under `docs/` and must be kept current.
 
@@ -12,7 +12,7 @@ Build an autonomous engineering agent that can accept structured feature request
 ## Immediate Priorities
 1. Document the existing orchestrator behaviour and identify extension seams.
 2. Design and persist structured task specifications and a backlog ingestion flow.
-3. Replace the placeholder fallback with logic that applies backlog tasks safely.
+3. Evolve the TaskSpec-driven execution loop to apply backlog tasks safely and record outcomes.
 4. Establish documentation and decision records so future runs can operate with full context.
 
 ## Run Protocol

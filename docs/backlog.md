@@ -4,14 +4,13 @@ _Status key:_ `[ ]` open, `[~]` in progress, `[x]` done.
 
 ## Ready Next (High Priority)
 - [x] Audit `agent/orchestrator.py` to document the current execution flow, key entry points, and how prompts are loaded. Capture findings in `docs/orchestrator_overview.md`.
-- [ ] Replace the `add_example_code()` fallback with logic that selects meaningful tasks from the backlog before editing files.
+- [x] Replace the `add_example_code()` fallback with logic that selects meaningful tasks from the backlog before editing files.
 - [x] Define a `TaskSpec` data model (e.g., in `agent/core/taskspec.py`) that captures requested changes, context, and acceptance criteria, alongside unit tests.
-- [~] Integrate the file-backed `TaskSpec` loader into `agent/orchestrator.py`, replacing the placeholder fallback.
-  - Introduced `agent/core/task_context.py` to partition ready and blocked tasks while preparing prompt summaries.
-  - Added `load_task_prompt()` helper to provide both structured batches and pre-formatted prompt text for the orchestrator.
-  - Extended `load_task_prompt()` to return a `TaskPrompt` payload bundling task identifiers and markdown summaries for orchestrator consumption.
-  - Completed task identifiers now render in the prompt output, giving the orchestrator visibility into previously delivered work.
-  - Next: wire the orchestrator prompt builder to consume the `TaskPrompt` payload instead of relying on `add_example_code()`.
+- [x] Integrate the file-backed `TaskSpec` loader into `agent/orchestrator.py`, replacing the placeholder fallback.
+  - The orchestrator now loads backlog context via `load_task_prompt()` and injects ready-task details into the model prompt.
+  - Runs skip execution when no ready tasks exist, emitting events instead of mutating the repository with placeholder content.
+  - Commit and PR metadata reuse the selected TaskSpec title so automation outputs align with the backlog terminology.
+  - Next: persist task completion state automatically once changes land to keep the backlog in sync.
 
 ## Near Term
 - [x] Implement a lightweight backlog loader that reads structured tasks (JSON) and exposes them to the orchestrator (see `agent/core/task_loader.py`).

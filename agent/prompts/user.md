@@ -5,7 +5,7 @@
 - Deliver work that eliminates placeholders and establishes durable tooling, documentation, and tests.
 
 ## Repository Facts
-- `agent/orchestrator.py` handles branch creation, prompt loading, fallback sample updates, and PR creation.
+- `agent/orchestrator.py` handles branch creation, TaskSpec-driven prompt loading, execution, and PR creation.
 - Prompts live in `agent/prompts/`. Update them when operational guidance changes.
 - Knowledge base: `docs/ROADMAP.md`, `docs/backlog.md`, decision records under `docs/decisions/` (create when needed).
 

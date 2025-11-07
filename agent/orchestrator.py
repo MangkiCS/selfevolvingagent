@@ -18,6 +18,12 @@ from typing import Iterable, List, Optional
 from openai import OpenAI
 
 from agent.core.event_log import append_event
+from agent.core.task_context import (
+    DEFAULT_TASKS_DIR,
+    TaskContextError,
+    TaskPrompt,
+    load_task_prompt,
+)
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 AUTO_BRANCH_PREFIX = "auto/"
@@ -272,32 +278,28 @@ def apply_plan(plan: dict) -> None:
         write(t["path"], t["content"])
 
 
-# ---------------- Beispielcode (Fallback) ----------------
-def add_example_code() -> None:
-    write("agent/__init__.py", "")
-    write("agent/core/__init__.py", "")
-    write(
-        "agent/core/hello.py",
-        '''"""Core hello util"""
-from typing import Final
+def _prepare_task_prompt() -> Optional[TaskPrompt]:
+    try:
+        return load_task_prompt(DEFAULT_TASKS_DIR)
+    except TaskContextError as exc:
+        append_event(
+            level="error",
+            source="task_context",
+            message="Failed to load task prompt",
+            details={"error": str(exc)},
+        )
+        return None
 
-GREETING: Final[str] = "Hello"
 
-def say_hello(name: str) -> str:
-    return f"{GREETING}, {name}!"
-''',
-    )
-    # Build-Marker -> sorgt dafür, dass immer ein Commit entsteht
-    ts = datetime.datetime.utcnow().isoformat()
-    write("agent/core/buildinfo.py", f'BUILD_TS = "{ts}"\n')
-    write(
-        "tests/test_hello.py",
-        '''from agent.core.hello import say_hello
-
-def test_say_hello():
-    assert say_hello("World") == "Hello, World!"
-''',
-    )
+def _format_task_prompt_section(task_prompt: TaskPrompt) -> str:
+    ready_ids = [spec.task_id for spec in task_prompt.ready]
+    identifiers = ", ".join(ready_ids) if ready_ids else "none"
+    sections = [
+        "## Task Backlog",
+        task_prompt.prompt.strip(),
+        f"Ready task identifiers: {identifiers}",
+    ]
+    return "\n\n".join(part for part in sections if part).strip()
 
 
 # ---------------- Checks ----------------
@@ -366,7 +368,7 @@ def apply_auto_label(pr_number: int) -> None:
     gh_api("POST", f"/issues/{pr_number}/labels", {"labels": [AUTO_LABEL]})
 
 
-def create_pull_request(branch: str) -> Optional[int]:
+def create_pull_request(branch: str, *, title: str, body: str) -> Optional[int]:
     try:
         ensure_auto_branch(branch)
     except ValueError as exc:
@@ -378,8 +380,8 @@ def create_pull_request(branch: str) -> Optional[int]:
         "POST",
         "/pulls",
         {
-            "title": "feat(core): add hello util (auto)",
-            "body": "Automatisch generierter Patch: neue Funktion und Test.",
+            "title": title,
+            "body": body,
             "head": branch,
             "base": base,
             "maintainer_can_modify": True,
@@ -398,14 +400,39 @@ def create_pull_request(branch: str) -> Optional[int]:
 # ---------------- Main ----------------
 def main() -> int:
     ensure_git_identity()
-    branch = create_branch()
 
-    used_llm = False
+    task_prompt = _prepare_task_prompt()
+    if task_prompt is None:
+        return 1
+    if not task_prompt.prompt.strip() or task_prompt.is_empty():
+        append_event(
+            level="warning",
+            source="orchestrator",
+            message="No task prompt available; skipping orchestration run.",
+        )
+        return 0
+    if not task_prompt.has_ready_tasks():
+        append_event(
+            level="info",
+            source="orchestrator",
+            message="No ready tasks available; nothing to execute.",
+            details={"blocked_task_ids": [spec.task_id for spec in task_prompt.blocked]},
+        )
+        return 0
+
+    primary_task = task_prompt.ready[0]
+    plan_applied = False
+    branch: Optional[str] = None
     try:
         system = (ROOT / "agent/prompts/system.md").read_text(encoding="utf-8")
         template = (ROOT / "agent/prompts/task_template.md").read_text(encoding="utf-8")
 
-        # Repo-Snapshot bauen und in das Template einfügen (oder anhängen)
+        backlog_section = _format_task_prompt_section(task_prompt)
+        if "{{task_prompt}}" in template:
+            template = template.replace("{{task_prompt}}", backlog_section)
+        else:
+            template = template + "\n\n" + backlog_section
+
         snapshot = build_repo_snapshot()
         if "{{repo_snapshot}}" in template:
             user = template.replace("{{repo_snapshot}}", snapshot)
@@ -414,8 +441,16 @@ def main() -> int:
 
         plan = call_code_model(system, user)
         if isinstance(plan, dict) and (plan.get("code_patches") or plan.get("new_tests")):
+            branch = create_branch()
             apply_plan(plan)
-            used_llm = True
+            plan_applied = True
+        else:
+            append_event(
+                level="warning",
+                source="orchestrator",
+                message="LLM produced no actionable patches; leaving repository unchanged.",
+            )
+            return 0
     except Exception as e:
         append_event(
             level="error",
@@ -423,12 +458,18 @@ def main() -> int:
             message="LLM call failed",
             details={"error": str(e)},
         )
-        print(f"LLM call failed; fallback to example code: {e}", file=sys.stderr)
+        print(f"LLM call failed: {e}", file=sys.stderr)
+        sh(["git", "checkout", "-"], check=False)
+        return 1
 
-    if not used_llm:
-        add_example_code()
+    if not plan_applied:
+        return 0
 
-    commit_all("feat(core): add hello util")
+    if branch is None:
+        branch = create_branch()
+
+    commit_message = f"feat: {primary_task.title}"
+    commit_all(commit_message)
     try:
         run_local_checks()
     except Exception as e:
@@ -443,7 +484,9 @@ def main() -> int:
         return 1
 
     push_branch(branch)
-    create_pull_request(branch)
+    pr_title = f"{primary_task.title} (auto)"
+    pr_body = primary_task.summary
+    create_pull_request(branch, title=pr_title, body=pr_body)
     return 0
 
 

@@ -14,9 +14,9 @@
    - The snapshot is embedded in the LLM prompt so the model can reason about the repository without fetching everything.
 
 3. **Prompt & Code Application**
-   - The orchestrator loads system and task prompts from `agent/prompts/` and sends them to the code model along with the snapshot.
+   - The orchestrator loads system and task prompts from `agent/prompts/` and augments them with TaskSpec context produced by `agent.core.task_context.load_task_prompt()`.
    - Helper `write()` persists any returned `code_patches` or `new_tests` by overwriting the target files atomically.
-   - When the model does not return targeted edits, `add_example_code()` overwrites `agent/core/hello.py`, `agent/core/buildinfo.py`, and `tests/test_hello.py` to keep the pipeline active—this placeholder must be retired.
+   - When the model does not return actionable edits, the run records a warning event and exits without modifying the repository.
 
 4. **Checks & PR Automation**
    - Local quality gates are currently disabled; `run_local_checks()` simply records that they were skipped.
@@ -24,15 +24,13 @@
    - Failures from subprocesses, GitHub API calls, or LLM interactions are appended to `docs/run_events.json` so future runs (and the prompt snapshot) can inspect the most recent diagnostics.
 
 ## Gaps & Risks
-- **Placeholder fallback:** `add_example_code()` produces noisy commits with no business value.
-- **No backlog/task integration:** There is currently no mechanism to ingest structured work items or persist state across runs.
+- **Backlog state drift:** Completed TaskSpecs are not yet persisted automatically, so ready lists may include already-delivered work until the state store is updated.
 - **Event log retention:** Persistent logging now exists under `docs/run_events.json`, but only the most recent 200 entries are stored and the format may need to evolve as telemetry requirements grow.
 - **Snapshot limits:** Hard-coded file caps may hide critical context once the codebase grows; a smarter selection strategy is needed.
 
 ## Opportunities & Next Steps
-- Design a structured task specification (e.g., `TaskSpec`) plus storage format that the orchestrator can load safely.
-- Replace `add_example_code()` with logic that selects and executes backlog tasks in a controlled manner.
-- Surface the new `TaskPrompt` payload from `agent.core.task_context` when constructing model prompts so backlog context drives code generation decisions.
+- Persist completion of TaskSpecs as runs finish so future prompts can skip already delivered tasks.
+- Expand telemetry to capture why a run exited early (e.g., no ready tasks) and surface that in operator dashboards.
 - Capture run history, decisions, and troubleshooting notes under `docs/` to preserve institutional knowledge.
 - Introduce structured logging/telemetry so orchestration steps are traceable.
 
