@@ -39,7 +39,7 @@ class PipelineModelCallTests(unittest.TestCase):
             return captured[-1]
 
         with mock.patch.object(pipeline, "append_event", side_effect=fake_append_event):
-            with self.assertRaises(RuntimeError):
+            with self.assertRaises(pipeline.LLMCallError):
                 pipeline._call_model_json(  # type: ignore[protected-access]
                     DummyClient(),
                     system_prompt="sys",
@@ -91,7 +91,7 @@ class PipelineModelCallTests(unittest.TestCase):
 
         with mock.patch.dict(os.environ, {"OPENAI_API_MAX_RETRIES": "2"}):
             with mock.patch.object(pipeline, "append_event", side_effect=fake_append_event):
-                with self.assertRaises(TimeoutError):
+                with self.assertRaises(pipeline.LLMCallError):
                     pipeline._call_model_json(  # type: ignore[protected-access]
                         DummyClient(),
                         system_prompt="sys",

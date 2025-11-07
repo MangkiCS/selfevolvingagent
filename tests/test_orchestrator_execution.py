@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 import agent.orchestrator as orchestrator
+from agent.core import pipeline
 from agent.core.task_context import TaskBatch, TaskPrompt
 from agent.core.taskspec import TaskSpec
 
@@ -197,6 +198,62 @@ def test_admin_requests_are_logged_and_announced(monkeypatch, capsys):
     stdout = capsys.readouterr().out
     assert "Admin assistance requested" in stdout
     assert "Need API key" in stdout
+
+
+def test_main_surfaces_stage_metadata_on_llm_failure(monkeypatch, capsys):
+    spec = TaskSpec(
+        task_id="task/failure",
+        title="Handle failures",
+        summary="Ensure orchestrator surfaces stage metadata when LLM calls fail.",
+        priority="high",
+    )
+
+    task_prompt = _make_task_prompt(spec)
+
+    monkeypatch.setattr(orchestrator, "load_available_tasks", lambda: [spec])
+    monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
+    monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
+    monkeypatch.setattr(orchestrator, "_get_vector_store", lambda: None)
+    monkeypatch.setattr(orchestrator, "_maybe_create_openai_client", lambda: None)
+
+    events: list[dict[str, object]] = []
+
+    def fake_append_event(*, level, source, message, details=None):  # type: ignore[no-untyped-def]
+        entry = {
+            "level": level,
+            "source": source,
+            "message": message,
+            "details": details or {},
+        }
+        events.append(entry)
+        return entry
+
+    monkeypatch.setattr(orchestrator, "append_event", fake_append_event)
+
+    def raise_failure(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise pipeline.LLMCallError(
+            stage="execution_plan",
+            attempts=3,
+            model="test-model",
+            error=RuntimeError("boom"),
+        )
+
+    monkeypatch.setattr(orchestrator, "call_code_model", raise_failure)
+
+    result = orchestrator.main()
+    assert result == 1
+
+    stderr = capsys.readouterr().err
+    assert "execution_plan" in stderr
+    assert "test-model" in stderr
+
+    failure_events = [event for event in events if event["message"] == "LLM call failed"]
+    assert failure_events, "expected orchestrator to record failure event"
+    failure_details = failure_events[-1]["details"]
+    assert failure_details["stage"] == "execution_plan"
+    assert failure_details["attempts"] == 3
+    assert failure_details["model"] == "test-model"
+    assert failure_details["error_type"] == "RuntimeError"
 
 
 def test_main_does_not_checkout_previous_branch_when_model_fails(monkeypatch):

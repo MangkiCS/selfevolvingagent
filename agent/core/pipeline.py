@@ -30,6 +30,29 @@ RETRIEVAL_MODEL_ENV = "RETRIEVAL_MODEL"
 EXECUTION_MODEL_ENV = "EXECUTION_MODEL"
 
 
+class LLMCallError(RuntimeError):
+    """Exception raised when the LLM pipeline exhausts retries."""
+
+    def __init__(
+        self,
+        *,
+        stage: Optional[str],
+        attempts: int,
+        model: str,
+        error: Exception,
+    ) -> None:
+        self.stage = stage
+        self.attempts = attempts
+        self.model = model
+        self.original_error = error
+        stage_label = stage or "unknown"
+        message = (
+            f"LLM call failed after {attempts} attempt(s) during stage "
+            f"'{stage_label}' with model {model}: {error}"
+        )
+        super().__init__(message)
+
+
 @dataclass
 class StageUsage:
     """Normalised token accounting for an LLM stage."""
@@ -418,8 +441,9 @@ def _call_model_json(
 
     if last_error:
         error_message = _truncate_message(str(last_error))
+        attempts = attempt_count or max_retries
         details = {
-            "attempts": attempt_count or max_retries,
+            "attempts": attempts,
             "model": current_model,
             "error_type": type(last_error).__name__,
             "error": error_message,
@@ -432,7 +456,12 @@ def _call_model_json(
             message="llm_call_exhausted",
             details=details,
         )
-        raise last_error
+        raise LLMCallError(
+            stage=stage,
+            attempts=attempts,
+            model=current_model,
+            error=last_error,
+        ) from last_error
     return {}, StageUsage()
 
 
