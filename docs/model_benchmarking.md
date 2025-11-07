@@ -36,26 +36,25 @@ good balance between cost and quality:
 
 | Stage             | Recommended model | Rationale |
 | ----------------- | ----------------- | --------- |
-| Context summary   | `gpt-4.1-mini`    | Fast, inexpensive summarisation while preserving sufficient context fidelity. |
-| Retrieval brief   | `gpt-4.1-mini`    | Adequate reasoning to select focus files without incurring the highest-tier cost. |
-| Execution plan    | `gpt-5-codex`     | Highest quality for code synthesis and plan generation. |
+| Context summary   | `scaleway/deepseek-r1-distill-llama-70b` | Strong reasoning quality with broad Scaleway availability. |
+| Retrieval brief   | `scaleway/deepseek-r1-distill-llama-70b` | Keeps behaviour consistent across stages. |
+| Execution plan    | `scaleway/deepseek-r1-distill-llama-70b` | Reliable code synthesis at a competitive price point. |
 
 Configure these defaults via environment variables before launching the
 orchestrator:
 
 ```bash
-export CONTEXT_MODEL=gpt-4.1-mini
-export RETRIEVAL_MODEL=gpt-4.1-mini
-export EXECUTION_MODEL=gpt-5-codex
+export CONTEXT_MODEL=scaleway/deepseek-r1-distill-llama-70b
+export RETRIEVAL_MODEL=scaleway/deepseek-r1-distill-llama-70b
+export EXECUTION_MODEL=scaleway/deepseek-r1-distill-llama-70b
 
-When using the default Scaleway provider, override these variables with model
-identifiers exposed by the Scaleway Generative API (for example,
-`scaleway/llama-3-8b-instruct`). The environment variables are shared across
-providers, allowing seamless switching via `LLM_PROVIDER`.
+You can replace these with any model identifier exposed by the Scaleway
+Generative API. The environment variables are shared across providers, allowing
+seamless switching via `LLM_PROVIDER`.
 ```
 
 If the specified model rejects a request due to quota limits, the pipeline
-automatically retries with the fallback model (`gpt-5`).
+automatically retries with the fallback model (`scaleway/llama-3-70b-instruct`).
 
 ## Updating production guidance
 

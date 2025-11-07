@@ -18,7 +18,7 @@ from agent.core.vector_store import QueryResult, VectorStore
 from agent.core.openai_quota import capture_quota_snapshot, format_quota_snapshot_for_console
 
 
-DEFAULT_MODEL = "scaleway/llama-3-8b-instruct"
+DEFAULT_MODEL = "scaleway/deepseek-r1-distill-llama-70b"
 FALLBACK_MODEL = "scaleway/llama-3-70b-instruct"
 DEFAULT_API_TIMEOUT = 1800.0
 DEFAULT_API_MAX_RETRIES = 2
