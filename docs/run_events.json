@@ -25,5 +25,129 @@
     "details": {
       "error": "Model response failed: You exceeded your current quota, please check your plan and billing details. For more information on this error, read the docs: https://platform.openai.com/docs/guides/error-codes/api-errors."
     }
+  },
+  {
+    "timestamp": "2025-11-07T23:24:10.914713+00:00",
+    "level": "warning",
+    "source": "llm_client",
+    "message": "scaleway_api_key_missing",
+    "details": {
+      "provider": "scaleway"
+    }
+  },
+  {
+    "timestamp": "2025-11-07T23:24:10.915209+00:00",
+    "level": "warning",
+    "source": "orchestrator",
+    "message": "llm_client_unavailable"
+  },
+  {
+    "timestamp": "2025-11-07T23:24:10.916757+00:00",
+    "level": "warning",
+    "source": "orchestrator",
+    "message": "fallback_run_recorded",
+    "details": {
+      "reason": "LLM client unavailable because OPENAI_API_KEY is not configured.",
+      "task_id": "task/execute"
+    }
+  },
+  {
+    "timestamp": "2025-11-07T23:24:10.918907+00:00",
+    "level": "info",
+    "source": "vector_store",
+    "message": "Refreshed embeddings for fallback log entry.",
+    "details": {
+      "paths": [
+        "docs/runbook/fallback_log.md"
+      ]
+    }
+  },
+  {
+    "timestamp": "2025-11-07T23:24:10.919470+00:00",
+    "level": "info",
+    "source": "checks",
+    "message": "Local quality gates are disabled; skipping checks."
+  },
+  {
+    "timestamp": "2025-11-07T23:24:11.028515+00:00",
+    "level": "warning",
+    "source": "orchestrator",
+    "message": "Ready tasks missing from in-memory catalog; using prompt payload.",
+    "details": {
+      "missing_task_ids": [
+        "task/skip"
+      ]
+    }
+  },
+  {
+    "timestamp": "2025-11-07T23:24:11.029144+00:00",
+    "level": "warning",
+    "source": "llm_client",
+    "message": "scaleway_api_key_missing",
+    "details": {
+      "provider": "scaleway"
+    }
+  },
+  {
+    "timestamp": "2025-11-07T23:24:11.029609+00:00",
+    "level": "warning",
+    "source": "orchestrator",
+    "message": "llm_client_unavailable"
+  },
+  {
+    "timestamp": "2025-11-07T23:24:11.030274+00:00",
+    "level": "error",
+    "source": "orchestrator",
+    "message": "LLM call failed",
+    "details": {
+      "error": "create_branch should not be called when no plan is returned"
+    }
+  },
+  {
+    "timestamp": "2025-11-07T23:24:11.043718+00:00",
+    "level": "warning",
+    "source": "orchestrator",
+    "message": "Ready tasks missing from in-memory catalog; using prompt payload.",
+    "details": {
+      "missing_task_ids": [
+        "task/admin"
+      ]
+    }
+  },
+  {
+    "timestamp": "2025-11-07T23:24:11.044378+00:00",
+    "level": "warning",
+    "source": "llm_client",
+    "message": "scaleway_api_key_missing",
+    "details": {
+      "provider": "scaleway"
+    }
+  },
+  {
+    "timestamp": "2025-11-07T23:24:11.045406+00:00",
+    "level": "warning",
+    "source": "orchestrator",
+    "message": "llm_client_unavailable"
+  },
+  {
+    "timestamp": "2025-11-07T23:24:11.056713+00:00",
+    "level": "warning",
+    "source": "orchestrator",
+    "message": "fallback_run_recorded",
+    "details": {
+      "reason": "LLM client unavailable because OPENAI_API_KEY is not configured.",
+      "task_id": "task/admin"
+    }
+  },
+  {
+    "timestamp": "2025-11-07T23:24:11.058527+00:00",
+    "level": "info",
+    "source": "vector_store",
+    "message": "Refreshed embeddings for fallback log entry.",
+    "details": {
+      "paths": [
+        "docs/runbook/fallback_log.md"
+      ]
+    }
   }
 ]
