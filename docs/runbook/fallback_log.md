@@ -20,3 +20,16 @@ Ensure orchestrator dispatches TaskSpec instructions.
 
 **Summary:**
 Ensure admin requests reach the event log and stdout.
+
+## 2025-11-08T08:00:52.389784+00:00
+
+- Task ID: orchestrator/load-task-specs
+- Title: Integrate TaskSpec loader
+- Reason: LLM client unavailable; create_llm_client returned None.
+
+**Summary:**
+Load structured TaskSpec definitions at the start of each orchestration run.
+
+**Acceptance criteria:**
+- Orchestrator reads TaskSpec files from the repository tasks directory.
+- Failures to load tasks are surfaced with actionable error messages.

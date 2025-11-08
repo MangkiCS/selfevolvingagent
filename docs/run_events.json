@@ -149,5 +149,41 @@
         "docs/runbook/fallback_log.md"
       ]
     }
+  },
+  {
+    "timestamp": "2025-11-08T08:00:52.386664+00:00",
+    "level": "warning",
+    "source": "llm_client",
+    "message": "scaleway_api_key_missing",
+    "details": {
+      "provider": "scaleway"
+    }
+  },
+  {
+    "timestamp": "2025-11-08T08:00:52.387030+00:00",
+    "level": "warning",
+    "source": "orchestrator",
+    "message": "llm_client_unavailable"
+  },
+  {
+    "timestamp": "2025-11-08T08:00:52.390008+00:00",
+    "level": "warning",
+    "source": "orchestrator",
+    "message": "fallback_run_recorded",
+    "details": {
+      "reason": "LLM client unavailable; create_llm_client returned None.",
+      "task_id": "orchestrator/load-task-specs"
+    }
+  },
+  {
+    "timestamp": "2025-11-08T08:00:52.391241+00:00",
+    "level": "info",
+    "source": "vector_store",
+    "message": "Refreshed embeddings for fallback log entry.",
+    "details": {
+      "paths": [
+        "docs/runbook/fallback_log.md"
+      ]
+    }
   }
 ]
