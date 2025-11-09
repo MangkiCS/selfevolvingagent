@@ -19,8 +19,14 @@ class LLMClient:
     supports_quota: bool = False
 
     @property
-    def responses(self) -> Any:  # pragma: no cover - simple delegation
-        return self.client.responses
+    def chat_completions(self) -> Any:  # pragma: no cover - simple delegation
+        chat = getattr(self.client, "chat", None)
+        if chat is None:
+            raise AttributeError("Client does not expose a chat namespace")
+        completions = getattr(chat, "completions", None)
+        if completions is None:
+            raise AttributeError("Chat namespace does not expose completions")
+        return completions
 
 
 def _normalise_provider(value: Optional[str]) -> str:
@@ -60,7 +66,7 @@ def _build_scaleway_client() -> Optional[LLMClient]:
         )
         return None
 
-    base_url = os.environ.get("SCALEWAY_API_BASE", "https://api.scaleway.com/ai/v1alpha1")
+    base_url = os.environ.get("SCALEWAY_API_BASE", "https://api.scaleway.ai/v1")
     base_url = base_url.rstrip("/")
 
     header_name = os.environ.get("SCALEWAY_API_KEY_HEADER", "")

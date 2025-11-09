@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -21,12 +22,15 @@ class PipelineModelCallTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def test_call_model_json_logs_stage_and_error_type_on_failure(self) -> None:
-        class FailingResponses:
+        class FailingCompletions:
             def create(self, *args, **kwargs):  # type: ignore[no-untyped-def]
                 raise RuntimeError("x" * (pipeline.ERROR_MESSAGE_MAX_LENGTH + 20))
 
+        class DummyChat:
+            completions = FailingCompletions()
+
         class DummyClient:
-            responses = FailingResponses()
+            chat = DummyChat()
 
         captured = []
 
@@ -70,12 +74,15 @@ class PipelineModelCallTests(unittest.TestCase):
         self.assertTrue(exhaustion_details["error"].endswith("…"))
 
     def test_call_model_json_records_exhaustion_after_retries(self) -> None:
-        class FailingResponses:
+        class FailingCompletions:
             def create(self, *args, **kwargs):  # type: ignore[no-untyped-def]
                 raise TimeoutError("retriable failure")
 
+        class DummyChat:
+            completions = FailingCompletions()
+
         class DummyClient:
-            responses = FailingResponses()
+            chat = DummyChat()
 
         captured = []
 
@@ -109,22 +116,24 @@ class PipelineModelCallTests(unittest.TestCase):
         self.assertEqual(details["error_type"], "TimeoutError")
 
     def test_call_model_json_warns_and_recovers_from_json_parse_failure(self) -> None:
-        class SuccessfulResponses:
+        class SuccessfulCompletions:
             def create(self, *args, **kwargs):  # type: ignore[no-untyped-def]
-                class Response:
-                    id = "resp_1"
-                    status = "completed"
-                    output_text = "{\"invalid\": true"
-                    usage = {
+                message = SimpleNamespace(content="{\"invalid\": true")
+                choice = SimpleNamespace(message=message, finish_reason="stop")
+                return SimpleNamespace(
+                    choices=[choice],
+                    usage={
                         "input_tokens": 5,
                         "output_tokens": 7,
                         "total_tokens": 12,
-                    }
+                    },
+                )
 
-                return Response()
+        class DummyChat:
+            completions = SuccessfulCompletions()
 
         class DummyClient:
-            responses = SuccessfulResponses()
+            chat = DummyChat()
 
         captured = []
 
