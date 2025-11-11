@@ -93,24 +93,8 @@ def test_main_executes_task_without_placeholder_artifacts(monkeypatch):
     monkeypatch.setattr(orchestrator, "load_available_tasks", fake_load_available_tasks)
     monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
-    monkeypatch.setattr(orchestrator, "_maybe_create_llm_client", lambda: object())
     monkeypatch.setattr(orchestrator, "create_branch", lambda: "auto/test-branch")
     monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "_snapshot_")
-    monkeypatch.setattr(orchestrator, "run_context_summary", lambda *args, **kwargs: pipeline.ContextSummary(summary="summary"))
-    monkeypatch.setattr(
-        orchestrator,
-        "run_retrieval_brief",
-        lambda *args, **kwargs: pipeline.RetrievalBrief(
-            brief="",
-            selected_context_ids=[],
-            focus_paths=list(spec.context),
-            handoff_notes="",
-            open_questions=[],
-            retrieved_snippets=[],
-        ),
-    )
-    monkeypatch.setattr(orchestrator, "refresh_vector_cache", lambda _store, *, touched_paths: list(touched_paths))
-    monkeypatch.setattr(orchestrator, "_get_vector_store", lambda: object())
 
     writes: list[tuple[str, str]] = []
     monkeypatch.setattr(orchestrator, "write", lambda path, content: writes.append((path, content)))
@@ -126,7 +110,7 @@ def test_main_executes_task_without_placeholder_artifacts(monkeypatch):
         lambda branch, title, body: prs.append((branch, title, body)),
     )
 
-    def fake_call_code_model(system: str, user: str, *, client=None) -> dict:
+    def fake_call_code_model(system: str, user: str) -> dict:
         assert "## Selected Task for Execution" in user
         assert spec.summary in user
         return {
@@ -164,17 +148,6 @@ def test_main_skips_when_model_returns_no_plan(monkeypatch):
     monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
     monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "_snapshot_")
-    monkeypatch.setattr(orchestrator, "_maybe_create_llm_client", lambda: object())
-    monkeypatch.setattr(orchestrator, "run_context_summary", lambda *args, **kwargs: pipeline.ContextSummary(summary="summary"))
-    monkeypatch.setattr(
-        orchestrator,
-        "run_retrieval_brief",
-        lambda *args, **kwargs: pipeline.RetrievalBrief(
-            brief="",
-            selected_context_ids=[],
-            focus_paths=list(spec.context),
-        ),
-    )
 
     def fail_branch() -> str:
         raise AssertionError("create_branch should not be called when no plan is returned")
@@ -187,7 +160,7 @@ def test_main_skips_when_model_returns_no_plan(monkeypatch):
     writes: list[tuple[str, str]] = []
     monkeypatch.setattr(orchestrator, "write", lambda path, content: writes.append((path, content)))
 
-    monkeypatch.setattr(orchestrator, "call_code_model", lambda system, user, *, client=None: {})
+    monkeypatch.setattr(orchestrator, "call_code_model", lambda system, user: {})
 
     result = orchestrator.main()
     assert result == 0
@@ -207,16 +180,7 @@ def test_admin_requests_are_logged_and_announced(monkeypatch, capsys):
     monkeypatch.setattr(orchestrator, "load_available_tasks", lambda: [spec])
     monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
-    monkeypatch.setattr(orchestrator, "_maybe_create_llm_client", lambda: object())
     monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "snapshot")
-    monkeypatch.setattr(orchestrator, "run_context_summary", lambda *args, **kwargs: pipeline.ContextSummary(summary="summary"))
-    monkeypatch.setattr(
-        orchestrator,
-        "run_retrieval_brief",
-        lambda *args, **kwargs: pipeline.RetrievalBrief(brief="", selected_context_ids=[], focus_paths=list(spec.context)),
-    )
-    monkeypatch.setattr(orchestrator, "refresh_vector_cache", lambda _store, *, touched_paths: list(touched_paths))
-    monkeypatch.setattr(orchestrator, "_get_vector_store", lambda: object())
 
     recorded: list[list[dict[str, str]]] = []
 
@@ -225,114 +189,15 @@ def test_admin_requests_are_logged_and_announced(monkeypatch, capsys):
         return {"details": {"requests": list(requests)}}
 
     monkeypatch.setattr(orchestrator, "log_admin_requests", fake_log_admin_requests)
-    monkeypatch.setattr(
-        orchestrator,
-        "call_code_model",
-        lambda system, user, *, client=None: {"admin_requests": [{"summary": "Need API key"}]},
-    )
+    monkeypatch.setattr(orchestrator, "call_code_model", lambda system, user: {"admin_requests": [{"summary": "Need API key"}]})
 
     result = orchestrator.main()
     assert result == 0
     assert recorded == [[{"summary": "Need API key"}]]
 
-
-def test_record_fallback_run_appends_entries(monkeypatch, tmp_path):
-    spec = TaskSpec(
-        task_id="task/fallback",
-        title="Fallback test",
-        summary="Ensure fallback runs persist structured notes.",
-        acceptance_criteria=("Record fallback reason",),
-    )
-
-    monkeypatch.setattr(orchestrator, "ROOT", tmp_path)
-
-    reason_one = "First failure"
-    touched = orchestrator._record_fallback_run(spec, reason=reason_one)
-    assert touched == ["docs/runbook/fallback_log.md"]
-
-    log_path = tmp_path / "docs" / "runbook" / "fallback_log.md"
-    assert log_path.exists()
-    content = log_path.read_text(encoding="utf-8")
-    assert "# Fallback Runs" in content
-    assert reason_one in content
-    assert content.count("## ") == 1
-
-    reason_two = "Second failure"
-    touched_again = orchestrator._record_fallback_run(spec, reason=reason_two)
-    assert touched_again == ["docs/runbook/fallback_log.md"]
-    updated = log_path.read_text(encoding="utf-8")
-    assert updated.count("## ") == 2
-    assert reason_two in updated
-
-
-def test_main_records_fallback_when_llm_missing(monkeypatch):
-    spec = TaskSpec(
-        task_id="task/fallback",
-        title="Fallback handling",
-        summary="Ensure orchestrator commits when no LLM is available.",
-        details="The run should capture the failure in docs/runbook/fallback_log.md.",
-        priority="high",
-    )
-
-    task_prompt = _make_task_prompt(spec)
-
-    monkeypatch.setattr(orchestrator, "load_available_tasks", lambda: [spec])
-    monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
-    monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
-    monkeypatch.setattr(orchestrator, "_maybe_create_llm_client", lambda: None)
-    monkeypatch.setattr(orchestrator, "_detect_llm_unavailability_reason", lambda: "No API key configured")
-    monkeypatch.setattr(orchestrator, "_get_vector_store", lambda: object())
-
-    fallback_calls: list[tuple[TaskSpec, str]] = []
-
-    def fake_record(task: TaskSpec, *, reason: str) -> list[str]:
-        fallback_calls.append((task, reason))
-        return ["docs/runbook/fallback_log.md"]
-
-    monkeypatch.setattr(orchestrator, "_record_fallback_run", fake_record)
-
-    refreshed_paths: list[list[str]] = []
-    monkeypatch.setattr(
-        orchestrator,
-        "refresh_vector_cache",
-        lambda _store, *, touched_paths: refreshed_paths.append(list(touched_paths)) or list(touched_paths),
-    )
-
-    monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "snapshot")
-
-    def fail_call_code_model(*_args, **_kwargs):
-        raise AssertionError("should not call code model")
-
-    monkeypatch.setattr(orchestrator, "call_code_model", fail_call_code_model)
-
-    created_branches: list[str] = []
-    monkeypatch.setattr(orchestrator, "create_branch", lambda: created_branches.append("auto/fallback-branch") or "auto/fallback-branch")
-
-    commits: list[str] = []
-    monkeypatch.setattr(orchestrator, "commit_all", lambda message: commits.append(message))
-
-    pushes: list[str] = []
-    monkeypatch.setattr(orchestrator, "push_branch", lambda branch: pushes.append(branch))
-
-    prs: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(
-        orchestrator,
-        "create_pull_request",
-        lambda branch, title, body: prs.append((branch, title, body)),
-    )
-
-    result = orchestrator.main()
-
-    assert result == 0
-    assert fallback_calls == [(spec, "No API key configured")]
-    assert refreshed_paths == [["docs/runbook/fallback_log.md"]]
-    assert created_branches == ["auto/fallback-branch"]
-    assert commits == ["chore: record fallback for task/fallback"]
-    assert pushes == ["auto/fallback-branch"]
-    assert prs and prs[0][0] == "auto/fallback-branch"
-    assert prs[0][1] == "Fallback: Fallback handling (auto)"
-    assert "No API key configured" in prs[0][2]
-    assert "docs/runbook/fallback_log.md" in prs[0][2]
+    stdout = capsys.readouterr().out
+    assert "Admin assistance requested" in stdout
+    assert "Need API key" in stdout
 
 
 def test_main_surfaces_stage_metadata_on_llm_failure(monkeypatch, capsys):
@@ -349,13 +214,7 @@ def test_main_surfaces_stage_metadata_on_llm_failure(monkeypatch, capsys):
     monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
     monkeypatch.setattr(orchestrator, "_get_vector_store", lambda: None)
-    monkeypatch.setattr(orchestrator, "_maybe_create_llm_client", lambda: object())
-    monkeypatch.setattr(orchestrator, "run_context_summary", lambda *args, **kwargs: pipeline.ContextSummary(summary="summary"))
-    monkeypatch.setattr(
-        orchestrator,
-        "run_retrieval_brief",
-        lambda *args, **kwargs: pipeline.RetrievalBrief(brief="", selected_context_ids=[], focus_paths=list(spec.context)),
-    )
+    monkeypatch.setattr(orchestrator, "_maybe_create_openai_client", lambda: None)
 
     events: list[dict[str, object]] = []
 
@@ -411,15 +270,7 @@ def test_main_does_not_checkout_previous_branch_when_model_fails(monkeypatch):
     monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
     monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "snapshot")
-    monkeypatch.setattr(orchestrator, "_maybe_create_llm_client", lambda: object())
-    monkeypatch.setattr(orchestrator, "run_context_summary", lambda *args, **kwargs: pipeline.ContextSummary(summary="summary"))
-    monkeypatch.setattr(
-        orchestrator,
-        "run_retrieval_brief",
-        lambda *args, **kwargs: pipeline.RetrievalBrief(brief="", selected_context_ids=[], focus_paths=list(spec.context)),
-    )
-    monkeypatch.setattr(orchestrator, "refresh_vector_cache", lambda _store, *, touched_paths: list(touched_paths))
-    monkeypatch.setattr(orchestrator, "_get_vector_store", lambda: object())
+    monkeypatch.setattr(orchestrator, "_maybe_create_openai_client", lambda: None)
 
     checkout_commands: list[list[str]] = []
 

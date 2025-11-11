@@ -15,6 +15,8 @@ import subprocess
 import sys
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
+from openai import OpenAI
+
 from agent.core.event_log import append_event, log_admin_requests
 from agent.core.pipeline import (
     ContextClue,
@@ -26,7 +28,6 @@ from agent.core.pipeline import (
     run_execution_plan,
     run_retrieval_brief,
 )
-from agent.core.llm_client import LLMClient, create_llm_client
 from agent.core.task_context import (
     DEFAULT_TASKS_DIR,
     TaskContextError,
@@ -111,7 +112,7 @@ def create_branch() -> str:
     if _PREFERRED_BRANCH_NAME:
         branch = _PREFERRED_BRANCH_NAME
     else:
-        ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
+        ts = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
         branch = f"{AUTO_BRANCH_PREFIX}{ts}"
     sh(["git", "checkout", "-b", branch])
     _PREFERRED_BRANCH_NAME = None
@@ -123,7 +124,7 @@ def commit_all(msg: str) -> None:
     status = sh(["git", "status", "--porcelain"], check=False).strip()
     if not status:
         # Nichts zu committen -> erzeugen wir eine kleine Buildmarke
-        ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        ts = datetime.datetime.utcnow().isoformat()
         autopath = ROOT / "docs" / "AUTOCOMMIT.md"
         prev = autopath.read_text(encoding="utf-8") if autopath.exists() else "# Auto log\n"
         write("docs/AUTOCOMMIT.md", prev + f"- auto: {ts}\n")
@@ -194,15 +195,16 @@ def _get_vector_store() -> VectorStore:
     return _VECTOR_STORE
 
 
-def _maybe_create_llm_client() -> Optional[LLMClient]:
-    client = create_llm_client()
-    if client is None:
+def _maybe_create_openai_client() -> Optional[OpenAI]:
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
         append_event(
             level="warning",
             source="orchestrator",
-            message="llm_client_unavailable",
+            message="OPENAI_API_KEY missing; skipping live model calls.",
         )
-    return client
+        return None
+    return OpenAI(api_key=api_key)
 
 
 def apply_plan(plan: ExecutionPlan) -> list[str]:
@@ -526,79 +528,6 @@ def _select_context_clues(
     return selected or list(context_summary.context_clues)
 
 
-def _detect_llm_unavailability_reason() -> str:
-    if not os.environ.get("OPENAI_API_KEY"):
-        return "LLM client unavailable because OPENAI_API_KEY is not configured."
-    return "LLM client unavailable; create_llm_client returned None."
-
-
-def _fallback_log_path() -> pathlib.Path:
-    return ROOT / "docs" / "runbook" / "fallback_log.md"
-
-
-def _record_fallback_run(task: TaskSpec, *, reason: str) -> list[str]:
-    timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    entry_lines: List[str] = [
-        f"## {timestamp}",
-        "",
-        f"- Task ID: {task.task_id}",
-        f"- Title: {task.title}",
-        f"- Reason: {reason}",
-    ]
-
-    if task.summary:
-        entry_lines.extend(["", "**Summary:**", task.summary.strip()])
-
-    if task.acceptance_criteria:
-        entry_lines.append("")
-        entry_lines.append("**Acceptance criteria:**")
-        entry_lines.extend(f"- {criterion}" for criterion in task.acceptance_criteria)
-
-    entry = "\n".join(entry_lines).strip()
-
-    path = _fallback_log_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    if path.exists():
-        existing = path.read_text(encoding="utf-8").rstrip()
-        if existing:
-            content = existing + "\n\n" + entry + "\n"
-        else:
-            content = "# Fallback Runs\n\n" + entry + "\n"
-    else:
-        content = "# Fallback Runs\n\n" + entry + "\n"
-
-    path.write_text(content, encoding="utf-8")
-    return [str(path.relative_to(ROOT))]
-
-
-def _build_fallback_pr_body(task: TaskSpec, reason: str) -> str:
-    sections: List[str] = [
-        f"Unable to execute **{task.task_id}** automatically.",
-        "",
-        f"**Reason:** {reason}",
-    ]
-
-    if task.summary:
-        sections.extend(["", "### Task summary", task.summary.strip()])
-
-    if task.details:
-        sections.extend(["", "### Task details", task.details.strip()])
-
-    sections.extend(
-        [
-            "",
-            "### Follow-up",
-            "- Provide the missing credentials or resolve the issue preventing model access.",
-            "- Re-run the workflow after addressing the problem so the orchestrator can execute the task.",
-            "",
-            "Fallback run details recorded in `docs/runbook/fallback_log.md`.",
-        ]
-    )
-
-    return "\n".join(sections).strip()
-
-
 def _build_execution_prompt(
     task: TaskSpec,
     retrieval_brief: RetrievalBrief,
@@ -639,18 +568,11 @@ def call_code_model(
     system_prompt: str,
     user_prompt: str,
     *,
-    client: LLMClient | None = None,
+    client: OpenAI | None = None,
 ) -> Dict[str, Any]:
     """Execute the code-generation stage and return a serialisable payload."""
 
-    runner = client or create_llm_client()
-    if runner is None:
-        append_event(
-            level="warning",
-            source="orchestrator",
-            message="llm_client_unavailable_for_execution",
-        )
-        return {}
+    runner = client or OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     execution_plan = run_execution_plan(runner, system_prompt=system_prompt, user_prompt=user_prompt)
     payload = execution_plan.to_dict()
     if execution_plan.notes:
@@ -770,45 +692,6 @@ def create_pull_request(branch: str, *, title: str, body: str) -> Optional[int]:
     return None
 
 
-# ---------------- Admin request helpers ----------------
-
-
-def _summarise_admin_request(request: Mapping[str, Any] | Any) -> str:
-    if not isinstance(request, Mapping):
-        return json.dumps(request, ensure_ascii=False)
-
-    for key in ("summary", "message", "reason", "description", "details"):
-        value = request.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-
-    for key, value in request.items():
-        if isinstance(value, str) and value.strip():
-            return f"{key}: {value.strip()}"
-
-    return json.dumps(request, ensure_ascii=False)
-
-
-def _announce_admin_requests(requests: Sequence[Mapping[str, Any]] | Sequence[Any]) -> None:
-    if not requests:
-        return
-
-    stored = log_admin_requests(requests)
-    if not stored:
-        return
-
-    details = stored.get("details", {})
-    recorded = details.get("requests", [])
-    if not recorded:
-        return
-
-    print("\nAdmin assistance requested:")
-    for idx, request in enumerate(recorded, start=1):
-        summary = _summarise_admin_request(request)
-        print(f"  {idx}. {summary}")
-    print()
-
-
 # ---------------- Main ----------------
 def main() -> int:
     ensure_git_identity()
@@ -847,34 +730,20 @@ def main() -> int:
     plan_applied = False
     branch_checked_out = False
     vector_store = _get_vector_store()
-    client = _maybe_create_llm_client()
-    fallback_reason: Optional[str] = None
+    client = _maybe_create_openai_client()
     try:
         system = (ROOT / "agent/prompts/system.md").read_text(encoding="utf-8")
 
         if client is None:
-            fallback_reason = _detect_llm_unavailability_reason()
-            branch_name = create_branch()
-            branch_checked_out = True
-            touched_paths = _record_fallback_run(primary_task, reason=fallback_reason)
-            append_event(
-                level="warning",
-                source="orchestrator",
-                message="fallback_run_recorded",
-                details={"reason": fallback_reason, "task_id": primary_task.task_id},
+            context_summary = ContextSummary(summary=task_prompt.prompt)
+            retrieval_brief = RetrievalBrief(
+                brief="",
+                selected_context_ids=[],
+                focus_paths=list(primary_task.context),
+                handoff_notes="",
+                open_questions=[],
+                retrieved_snippets=[],
             )
-            refreshed = refresh_vector_cache(vector_store, touched_paths=touched_paths)
-            if refreshed:
-                append_event(
-                    level="info",
-                    source="vector_store",
-                    message="Refreshed embeddings for fallback log entry.",
-                    details={"paths": refreshed},
-                )
-            commit_message = f"chore: record fallback for {primary_task.task_id}"
-            pr_title = f"Fallback: {primary_task.title} (auto)"
-            pr_body = _build_fallback_pr_body(primary_task, fallback_reason)
-            plan_applied = True
         else:
             context_prompt = _build_context_summary_prompt(task_prompt, primary_task)
             context_summary = run_context_summary(
@@ -891,33 +760,36 @@ def main() -> int:
                 max_snippets=MAX_RETRIEVED_SNIPPETS,
             )
 
-            selected_clues = _select_context_clues(context_summary, retrieval_brief)
-            execution_prompt = _build_execution_prompt(primary_task, retrieval_brief, selected_clues)
+        selected_clues = _select_context_clues(context_summary, retrieval_brief)
+        execution_prompt = _build_execution_prompt(primary_task, retrieval_brief, selected_clues)
+        if client is None:
+            execution_payload = call_code_model(system, execution_prompt)
+        else:
             execution_payload = call_code_model(system, execution_prompt, client=client)
-            execution_plan = _coerce_execution_plan(execution_payload)
-            _announce_admin_requests(execution_plan.admin_requests)
+        execution_plan = _coerce_execution_plan(execution_payload)
+        _announce_admin_requests(execution_plan.admin_requests)
 
-            if execution_plan.has_changes():
-                branch_name = _checkout_branch_for_task(branch_name)
-                branch_checked_out = True
-                touched_paths = apply_plan(execution_plan)
-                refreshed = refresh_vector_cache(vector_store, touched_paths=touched_paths)
-                if refreshed:
-                    append_event(
-                        level="info",
-                        source="vector_store",
-                        message="Refreshed embeddings for updated docs/tests files.",
-                        details={"paths": refreshed},
-                    )
-                plan_applied = True
-            else:
+        if execution_plan.has_changes():
+            branch_name = _checkout_branch_for_task(branch_name)
+            branch_checked_out = True
+            touched_paths = apply_plan(execution_plan)
+            refreshed = refresh_vector_cache(vector_store, touched_paths=touched_paths)
+            if refreshed:
                 append_event(
-                    level="warning",
-                    source="orchestrator",
-                    message="LLM produced no actionable patches; leaving repository unchanged.",
-                    details={"stage": "execution_plan"},
+                    level="info",
+                    source="vector_store",
+                    message="Refreshed embeddings for updated docs/tests files.",
+                    details={"paths": refreshed},
                 )
-                return 0
+            plan_applied = True
+        else:
+            append_event(
+                level="warning",
+                source="orchestrator",
+                message="LLM produced no actionable patches; leaving repository unchanged.",
+                details={"stage": "execution_plan"},
+            )
+            return 0
     except LLMCallError as exc:
         error_details = {
             "error": str(exc.original_error),
@@ -985,4 +857,39 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+# ---------------- Admin request helpers ----------------
+def _summarise_admin_request(request: Mapping[str, Any] | Any) -> str:
+    if not isinstance(request, Mapping):
+        return json.dumps(request, ensure_ascii=False)
+
+    for key in ("summary", "message", "reason", "description", "details"):
+        value = request.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    for key, value in request.items():
+        if isinstance(value, str) and value.strip():
+            return f"{key}: {value.strip()}"
+
+    return json.dumps(request, ensure_ascii=False)
+
+
+def _announce_admin_requests(requests: Sequence[Mapping[str, Any]] | Sequence[Any]) -> None:
+    if not requests:
+        return
+
+    stored = log_admin_requests(requests)
+    if not stored:
+        return
+
+    details = stored.get("details", {})
+    recorded = details.get("requests", [])
+    if not recorded:
+        return
+
+    print("\nAdmin assistance requested:")
+    for idx, request in enumerate(recorded, start=1):
+        summary = _summarise_admin_request(request)
+        print(f"  {idx}. {summary}")
+    print()
 

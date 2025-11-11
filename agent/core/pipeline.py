@@ -5,7 +5,9 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+from openai import OpenAI
 
 from agent.core.event_log import (
     append_event,
@@ -13,15 +15,15 @@ from agent.core.event_log import (
     log_stage_transition,
     log_token_usage,
 )
-from agent.core.llm_client import LLMClient
 from agent.core.vector_store import QueryResult, VectorStore
 from agent.core.openai_quota import capture_quota_snapshot, format_quota_snapshot_for_console
 
 
-DEFAULT_MODEL = "scaleway/deepseek-r1-distill-llama-70b"
-FALLBACK_MODEL = "scaleway/llama-3-70b-instruct"
+DEFAULT_MODEL = "gpt-5-codex"
+FALLBACK_MODEL = "gpt-5"
 DEFAULT_API_TIMEOUT = 1800.0
 DEFAULT_API_MAX_RETRIES = 2
+DEFAULT_API_POLL_INTERVAL = 1.5
 DEFAULT_API_REQUEST_TIMEOUT = 30.0
 ERROR_MESSAGE_MAX_LENGTH = 240
 
@@ -185,44 +187,34 @@ def _log_model_selection(stage: str, model: str, source: str) -> None:
     )
 
 
-def _extract_chat_completion_text(response: Any) -> str:
-    choices = getattr(response, "choices", None)
-    if choices is None and isinstance(response, dict):
-        choices = response.get("choices")
-    if not choices:
+def _extract_response_text(parts: Optional[Iterable[object]]) -> str:
+    if not parts:
         return ""
-
-    first_choice = choices[0]
-    if isinstance(first_choice, dict):
-        message = first_choice.get("message")
-        text = first_choice.get("text")
-    else:
-        message = getattr(first_choice, "message", None)
-        text = getattr(first_choice, "text", None)
-
-    if text and isinstance(text, str):
-        return text
-
-    if isinstance(message, dict):
-        content = message.get("content")
-    else:
-        content = getattr(message, "content", None)
-
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, Sequence):
-        fragments: List[str] = []
-        for segment in content:
-            if isinstance(segment, dict):
-                value = segment.get("text")
-            else:
-                value = getattr(segment, "text", None)
-            if isinstance(value, str) and value:
-                fragments.append(value)
-        return "".join(fragments)
-    return str(content)
+    chunks: List[str] = []
+    for item in parts:
+        if isinstance(item, dict):
+            item_type = item.get("type")
+            content = item.get("content")
+        else:
+            item_type = getattr(item, "type", None)
+            content = getattr(item, "content", None)
+        if item_type == "message":
+            if not content:
+                continue
+            for segment in content:
+                if isinstance(segment, dict):
+                    segment_type = segment.get("type")
+                    text = segment.get("text", "")
+                else:
+                    segment_type = getattr(segment, "type", None)
+                    text = getattr(segment, "text", "")
+                if segment_type == "output_text" and text:
+                    chunks.append(text)
+        elif item_type == "output_text":
+            text = item.get("text", "") if isinstance(item, dict) else getattr(item, "text", "")
+            if text:
+                chunks.append(text)
+    return "".join(chunks)
 
 
 def _normalise_text(value: Any) -> str:
@@ -326,7 +318,7 @@ def _extract_usage(response: Any) -> StageUsage:
 
 
 def _call_model_json(
-    client: LLMClient,
+    client: OpenAI,
     *,
     system_prompt: str,
     user_prompt: str,
@@ -335,6 +327,7 @@ def _call_model_json(
 ) -> Tuple[Dict[str, Any], StageUsage]:
     timeout = _env_float("OPENAI_API_TIMEOUT", DEFAULT_API_TIMEOUT)
     max_retries = max(1, _env_int("OPENAI_API_MAX_RETRIES", DEFAULT_API_MAX_RETRIES))
+    poll_interval = max(0.2, _env_float("OPENAI_API_POLL_INTERVAL", DEFAULT_API_POLL_INTERVAL))
     request_timeout = max(1.0, _env_float("OPENAI_API_REQUEST_TIMEOUT", DEFAULT_API_REQUEST_TIMEOUT))
 
     last_error: Optional[Exception] = None
@@ -342,20 +335,19 @@ def _call_model_json(
     current_model = model
 
     stage_label = stage or "unknown"
-    quota_snapshot = None
-    if client.supports_quota:
-        try:
-            quota_snapshot = capture_quota_snapshot(
-                client.client,
-                request_timeout=request_timeout,
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging only
-            append_event(
-                level="warning",
-                source="openai_quota",
-                message="snapshot_failed",
-                details={"stage": stage_label, "error": str(exc)},
-            )
+    try:
+        quota_snapshot = capture_quota_snapshot(
+            client,
+            request_timeout=request_timeout,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging only
+        append_event(
+            level="warning",
+            source="openai_quota",
+            message="snapshot_failed",
+            details={"stage": stage_label, "error": str(exc)},
+        )
+        quota_snapshot = None
 
     if quota_snapshot and not quota_snapshot.is_empty():
         log_quota_snapshot(
@@ -369,53 +361,75 @@ def _call_model_json(
     for attempt in range(1, max_retries + 1):
         try:
             attempt_count = attempt
-            start_time = time.monotonic()
-            response = client.chat_completions.create(
+            deadline = time.monotonic() + timeout
+            response = client.responses.create(
                 model=current_model,
-                messages=[
+                input=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
+                background=True,
                 timeout=min(request_timeout, timeout),
             )
 
-            elapsed = time.monotonic()
-            if elapsed - start_time > timeout:
-                raise TimeoutError("LLM call exceeded configured timeout")
+            response_id = getattr(response, "id", None)
+            status = getattr(response, "status", None)
+            while status in (None, "queued", "in_progress"):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("LLM call exceeded configured timeout")
+                time.sleep(min(poll_interval, remaining))
+                if not response_id:
+                    break
+                response = client.responses.retrieve(
+                    response_id,
+                    timeout=min(request_timeout, max(remaining, 0.1)),
+                )
+                status = getattr(response, "status", None)
 
-            text = _extract_chat_completion_text(response)
-            payload: Dict[str, Any]
-            if text:
-                try:
-                    payload = json.loads(text)
-                except Exception as exc:
-                    details = {
-                        "attempt": attempt,
-                        "excerpt": _truncate_message(text),
-                        "error_type": type(exc).__name__,
-                    }
-                    if stage:
-                        details["stage"] = stage
-                    append_event(
-                        level="warning",
-                        source="pipeline",
-                        message="model_json_parse_failed",
-                        details=details,
-                    )
+            if status == "completed":
+                text = getattr(response, "output_text", None)
+                if not text:
+                    text = _extract_response_text(getattr(response, "output", None))
+                payload: Dict[str, Any]
+                if text:
+                    try:
+                        payload = json.loads(text)
+                    except Exception as exc:
+                        details = {
+                            "attempt": attempt,
+                            "excerpt": _truncate_message(text),
+                            "error_type": type(exc).__name__,
+                        }
+                        if stage:
+                            details["stage"] = stage
+                        append_event(
+                            level="warning",
+                            source="pipeline",
+                            message="model_json_parse_failed",
+                            details=details,
+                        )
+                        payload = {}
+                else:
                     payload = {}
-            else:
-                payload = {}
-            append_event(
-                level="info",
-                source="pipeline",
-                message="model_call_completed",
-                details={
-                    "model": current_model,
-                    **({"stage": stage} if stage else {}),
-                    "attempts": attempt,
-                },
-            )
-            return payload, _extract_usage(response)
+                append_event(
+                    level="info",
+                    source="pipeline",
+                    message="model_call_completed",
+                    details={
+                        "model": current_model,
+                        **({"stage": stage} if stage else {}),
+                        "attempts": attempt,
+                    },
+                )
+                return payload, _extract_usage(response)
+
+            if status == "failed" and getattr(response, "error", None):
+                err = getattr(response, "error")
+                message = getattr(err, "message", repr(err))
+                raise RuntimeError(f"Model response failed: {message}")
+
+            raise RuntimeError(f"Model response did not complete (status={status})")
         except Exception as exc:  # pragma: no cover - defensive logging
             last_error = exc
             error_message = _truncate_message(str(exc))
@@ -479,7 +493,7 @@ def _call_model_json(
 
 
 def run_context_summary(
-    client: LLMClient,
+    client: OpenAI,
     *,
     system_prompt: str,
     user_prompt: str,
@@ -506,7 +520,7 @@ def run_context_summary(
 
 
 def run_retrieval_brief(
-    client: LLMClient,
+    client: OpenAI,
     *,
     system_prompt: str,
     user_prompt: str,
@@ -604,7 +618,7 @@ def _normalise_admin_requests(value: Any) -> List[Dict[str, Any]]:
 
 
 def run_execution_plan(
-    client: LLMClient,
+    client: OpenAI,
     *,
     system_prompt: str,
     user_prompt: str,

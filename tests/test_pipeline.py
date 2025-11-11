@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import os
-from types import SimpleNamespace
 import unittest
 from unittest import mock
 
 from agent.core import pipeline
-from agent.core.llm_client import LLMClient
 
 
 class PipelineModelCallTests(unittest.TestCase):
@@ -22,15 +20,12 @@ class PipelineModelCallTests(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     def test_call_model_json_logs_stage_and_error_type_on_failure(self) -> None:
-        class FailingCompletions:
+        class FailingResponses:
             def create(self, *args, **kwargs):  # type: ignore[no-untyped-def]
                 raise RuntimeError("x" * (pipeline.ERROR_MESSAGE_MAX_LENGTH + 20))
 
-        class DummyChat:
-            completions = FailingCompletions()
-
         class DummyClient:
-            chat = DummyChat()
+            responses = FailingResponses()
 
         captured = []
 
@@ -46,7 +41,7 @@ class PipelineModelCallTests(unittest.TestCase):
         with mock.patch.object(pipeline, "append_event", side_effect=fake_append_event):
             with self.assertRaises(pipeline.LLMCallError):
                 pipeline._call_model_json(  # type: ignore[protected-access]
-                    LLMClient(provider="test", client=DummyClient(), supports_quota=False),
+                    DummyClient(),
                     system_prompt="sys",
                     user_prompt="user",
                     stage="execution_plan",
@@ -74,15 +69,12 @@ class PipelineModelCallTests(unittest.TestCase):
         self.assertTrue(exhaustion_details["error"].endswith("…"))
 
     def test_call_model_json_records_exhaustion_after_retries(self) -> None:
-        class FailingCompletions:
+        class FailingResponses:
             def create(self, *args, **kwargs):  # type: ignore[no-untyped-def]
                 raise TimeoutError("retriable failure")
 
-        class DummyChat:
-            completions = FailingCompletions()
-
         class DummyClient:
-            chat = DummyChat()
+            responses = FailingResponses()
 
         captured = []
 
@@ -101,7 +93,7 @@ class PipelineModelCallTests(unittest.TestCase):
             with mock.patch.object(pipeline, "append_event", side_effect=fake_append_event):
                 with self.assertRaises(pipeline.LLMCallError):
                     pipeline._call_model_json(  # type: ignore[protected-access]
-                        LLMClient(provider="test", client=DummyClient(), supports_quota=False),
+                        DummyClient(),
                         system_prompt="sys",
                         user_prompt="user",
                         stage="context_summary",
@@ -116,24 +108,22 @@ class PipelineModelCallTests(unittest.TestCase):
         self.assertEqual(details["error_type"], "TimeoutError")
 
     def test_call_model_json_warns_and_recovers_from_json_parse_failure(self) -> None:
-        class SuccessfulCompletions:
+        class SuccessfulResponses:
             def create(self, *args, **kwargs):  # type: ignore[no-untyped-def]
-                message = SimpleNamespace(content="{\"invalid\": true")
-                choice = SimpleNamespace(message=message, finish_reason="stop")
-                return SimpleNamespace(
-                    choices=[choice],
-                    usage={
+                class Response:
+                    id = "resp_1"
+                    status = "completed"
+                    output_text = "{\"invalid\": true"
+                    usage = {
                         "input_tokens": 5,
                         "output_tokens": 7,
                         "total_tokens": 12,
-                    },
-                )
+                    }
 
-        class DummyChat:
-            completions = SuccessfulCompletions()
+                return Response()
 
         class DummyClient:
-            chat = DummyChat()
+            responses = SuccessfulResponses()
 
         captured = []
 
@@ -150,7 +140,7 @@ class PipelineModelCallTests(unittest.TestCase):
 
         with mock.patch.object(pipeline, "append_event", side_effect=fake_append_event):
             payload, usage = pipeline._call_model_json(  # type: ignore[protected-access]
-                LLMClient(provider="test", client=DummyClient(), supports_quota=False),
+                DummyClient(),
                 system_prompt="sys",
                 user_prompt="user",
                 stage="retrieval_brief",
