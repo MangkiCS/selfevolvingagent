@@ -59,3 +59,16 @@ Load structured TaskSpec definitions at the start of each orchestration run.
 **Acceptance criteria:**
 - Orchestrator reads TaskSpec files from the repository tasks directory.
 - Failures to load tasks are surfaced with actionable error messages.
+
+## 2025-11-11T12:25:32.938006+00:00
+
+- Task ID: orchestrator/load-task-specs
+- Title: Integrate TaskSpec loader
+- Reason: LLM client unavailable; create_llm_client returned None.
+
+**Summary:**
+Load structured TaskSpec definitions at the start of each orchestration run.
+
+**Acceptance criteria:**
+- Orchestrator reads TaskSpec files from the repository tasks directory.
+- Failures to load tasks are surfaced with actionable error messages.
