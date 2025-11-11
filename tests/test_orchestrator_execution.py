@@ -110,6 +110,20 @@ def test_main_executes_task_without_placeholder_artifacts(monkeypatch):
         lambda branch, title, body: prs.append((branch, title, body)),
     )
 
+    events: list[dict[str, object]] = []
+
+    def fake_append_event(*, level, source, message, details=None):  # type: ignore[no-untyped-def]
+        entry = {
+            "level": level,
+            "source": source,
+            "message": message,
+            "details": details or {},
+        }
+        events.append(entry)
+        return entry
+
+    monkeypatch.setattr(orchestrator, "append_event", fake_append_event)
+
     def fake_call_code_model(system: str, user: str) -> dict:
         assert "## Selected Task for Execution" in user
         assert spec.summary in user
@@ -132,6 +146,14 @@ def test_main_executes_task_without_placeholder_artifacts(monkeypatch):
     assert commits == ["feat: Execute orchestrated task"]
     assert prs and prs[0][1] == "Execute orchestrated task (auto)"
     assert prs[0][2] == spec.summary
+
+    outcome_events = [event for event in events if event["message"] == "run_outcome"]
+    assert outcome_events, "expected orchestrator to record run outcome"
+    outcome_details = outcome_events[-1]["details"]
+    assert outcome_details["status"] == "completed"
+    assert outcome_details["reason"] == "changes_applied"
+    assert outcome_details["patch_count"] == 1
+    assert outcome_details["test_count"] == 0
 
 
 def test_main_skips_when_model_returns_no_plan(monkeypatch):
@@ -160,11 +182,31 @@ def test_main_skips_when_model_returns_no_plan(monkeypatch):
     writes: list[tuple[str, str]] = []
     monkeypatch.setattr(orchestrator, "write", lambda path, content: writes.append((path, content)))
 
+    events: list[dict[str, object]] = []
+
+    def fake_append_event(*, level, source, message, details=None):  # type: ignore[no-untyped-def]
+        entry = {
+            "level": level,
+            "source": source,
+            "message": message,
+            "details": details or {},
+        }
+        events.append(entry)
+        return entry
+
+    monkeypatch.setattr(orchestrator, "append_event", fake_append_event)
+
     monkeypatch.setattr(orchestrator, "call_code_model", lambda system, user: {})
 
     result = orchestrator.main()
     assert result == 0
     assert writes == []
+
+    outcome_events = [event for event in events if event["message"] == "run_outcome"]
+    assert outcome_events, "expected orchestrator to record run outcome"
+    outcome_details = outcome_events[-1]["details"]
+    assert outcome_details["status"] == "skipped"
+    assert outcome_details["reason"] == "empty_execution_plan"
 
 
 def test_admin_requests_are_logged_and_announced(monkeypatch, capsys):
