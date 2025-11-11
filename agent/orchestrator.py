@@ -67,6 +67,26 @@ SNAPSHOT_EXCLUDE_SUFFIXES = (
 )
 
 
+def _log_run_outcome(
+    *,
+    status: str,
+    reason: str,
+    level: str = "info",
+    details: Optional[Mapping[str, Any]] = None,
+) -> None:
+    """Record a high-level outcome for the current run."""
+
+    payload: Dict[str, Any] = {"status": status, "reason": reason}
+    if details:
+        payload.update(details)
+    append_event(
+        level=level,
+        source="orchestrator",
+        message="run_outcome",
+        details=payload,
+    )
+
+
 # ---------------- Shell helper (ohne shell=True) ----------------
 def sh(args: List[str], check: bool = True, cwd: pathlib.Path = ROOT) -> str:
     print(f"$ {' '.join(args)}")
@@ -751,10 +771,19 @@ def main() -> int:
         return 1
 
     if task_prompt is None:
+        _log_run_outcome(status="skipped", reason="task_prompt_unavailable")
         return 0
 
     primary_task = _select_task_for_execution(task_prompt)
     if primary_task is None:
+        _log_run_outcome(
+            status="skipped",
+            reason="no_eligible_task",
+            details={
+                "ready_task_ids": [spec.task_id for spec in task_prompt.ready],
+                "completed_task_ids": list(task_prompt.completed),
+            },
+        )
         return 0
 
     metadata = _derive_task_metadata(primary_task)
@@ -766,6 +795,7 @@ def main() -> int:
     plan_applied = False
     branch_checked_out = False
     vector_store = _get_vector_store()
+    execution_plan: ExecutionPlan | None = None
     client = _maybe_create_openai_client()
     try:
         system = (ROOT / "agent/prompts/system.md").read_text(encoding="utf-8")
@@ -825,6 +855,14 @@ def main() -> int:
                 message="LLM produced no actionable patches; leaving repository unchanged.",
                 details={"stage": "execution_plan"},
             )
+            _log_run_outcome(
+                status="skipped",
+                reason="empty_execution_plan",
+                details={
+                    "plan_steps": execution_plan.plan,
+                    "notes": execution_plan.notes,
+                },
+            )
             return 0
     except LLMCallError as exc:
         error_details = {
@@ -869,6 +907,7 @@ def main() -> int:
         return 1
 
     if not plan_applied:
+        _log_run_outcome(status="skipped", reason="plan_not_applied")
         return 0
 
     commit_all(commit_message)
@@ -888,6 +927,18 @@ def main() -> int:
 
     push_branch(branch_name)
     create_pull_request(branch_name, title=pr_title, body=pr_body)
+    patch_count = len(execution_plan.code_patches) if execution_plan else 0
+    test_count = len(execution_plan.new_tests) if execution_plan else 0
+    _log_run_outcome(
+        status="completed",
+        reason="changes_applied",
+        details={
+            "branch": branch_name,
+            "commit_message": commit_message,
+            "patch_count": patch_count,
+            "test_count": test_count,
+        },
+    )
     return 0
 
 
