@@ -95,6 +95,25 @@ def test_main_executes_task_without_placeholder_artifacts(monkeypatch):
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
     monkeypatch.setattr(orchestrator, "create_branch", lambda: "auto/test-branch")
     monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "_snapshot_")
+    monkeypatch.setattr(
+        orchestrator,
+        "_load_recent_run_outcomes",
+        lambda limit=5: [
+            {
+                "timestamp": "2024-05-01T12:00:00+00:00",
+                "details": {"status": "skipped", "reason": "empty_execution_plan"},
+            },
+            {
+                "timestamp": "2024-05-02T09:00:00+00:00",
+                "details": {
+                    "status": "completed",
+                    "reason": "changes_applied",
+                    "patch_count": 3,
+                    "test_count": 1,
+                },
+            },
+        ],
+    )
 
     writes: list[tuple[str, str]] = []
     monkeypatch.setattr(orchestrator, "write", lambda path, content: writes.append((path, content)))
@@ -110,9 +129,25 @@ def test_main_executes_task_without_placeholder_artifacts(monkeypatch):
         lambda branch, title, body: prs.append((branch, title, body)),
     )
 
+    events: list[dict[str, object]] = []
+
+    def fake_append_event(*, level, source, message, details=None):  # type: ignore[no-untyped-def]
+        entry = {
+            "level": level,
+            "source": source,
+            "message": message,
+            "details": details or {},
+        }
+        events.append(entry)
+        return entry
+
+    monkeypatch.setattr(orchestrator, "append_event", fake_append_event)
+
     def fake_call_code_model(system: str, user: str) -> dict:
         assert "## Selected Task for Execution" in user
         assert spec.summary in user
+        assert "IMPORTANT: Recent run outcomes" in user
+        assert "empty_execution_plan" in user
         return {
             "code_patches": [
                 {"path": "docs/progress.md", "content": "# Progress\nUpdated\n"}
@@ -133,6 +168,14 @@ def test_main_executes_task_without_placeholder_artifacts(monkeypatch):
     assert prs and prs[0][1] == "Execute orchestrated task (auto)"
     assert prs[0][2] == spec.summary
 
+    outcome_events = [event for event in events if event["message"] == "run_outcome"]
+    assert outcome_events, "expected orchestrator to record run outcome"
+    outcome_details = outcome_events[-1]["details"]
+    assert outcome_details["status"] == "completed"
+    assert outcome_details["reason"] == "changes_applied"
+    assert outcome_details["patch_count"] == 1
+    assert outcome_details["test_count"] == 0
+
 
 def test_main_skips_when_model_returns_no_plan(monkeypatch):
     spec = TaskSpec(
@@ -148,6 +191,7 @@ def test_main_skips_when_model_returns_no_plan(monkeypatch):
     monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
     monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "_snapshot_")
+    monkeypatch.setattr(orchestrator, "_load_recent_run_outcomes", lambda limit=5: [])
 
     def fail_branch() -> str:
         raise AssertionError("create_branch should not be called when no plan is returned")
@@ -160,11 +204,31 @@ def test_main_skips_when_model_returns_no_plan(monkeypatch):
     writes: list[tuple[str, str]] = []
     monkeypatch.setattr(orchestrator, "write", lambda path, content: writes.append((path, content)))
 
+    events: list[dict[str, object]] = []
+
+    def fake_append_event(*, level, source, message, details=None):  # type: ignore[no-untyped-def]
+        entry = {
+            "level": level,
+            "source": source,
+            "message": message,
+            "details": details or {},
+        }
+        events.append(entry)
+        return entry
+
+    monkeypatch.setattr(orchestrator, "append_event", fake_append_event)
+
     monkeypatch.setattr(orchestrator, "call_code_model", lambda system, user: {})
 
     result = orchestrator.main()
     assert result == 0
     assert writes == []
+
+    outcome_events = [event for event in events if event["message"] == "run_outcome"]
+    assert outcome_events, "expected orchestrator to record run outcome"
+    outcome_details = outcome_events[-1]["details"]
+    assert outcome_details["status"] == "skipped"
+    assert outcome_details["reason"] == "empty_execution_plan"
 
 
 def test_admin_requests_are_logged_and_announced(monkeypatch, capsys):
@@ -181,6 +245,7 @@ def test_admin_requests_are_logged_and_announced(monkeypatch, capsys):
     monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
     monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "snapshot")
+    monkeypatch.setattr(orchestrator, "_load_recent_run_outcomes", lambda limit=5: [])
 
     recorded: list[list[dict[str, str]]] = []
 
@@ -215,6 +280,7 @@ def test_main_surfaces_stage_metadata_on_llm_failure(monkeypatch, capsys):
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
     monkeypatch.setattr(orchestrator, "_get_vector_store", lambda: None)
     monkeypatch.setattr(orchestrator, "_maybe_create_openai_client", lambda: None)
+    monkeypatch.setattr(orchestrator, "_load_recent_run_outcomes", lambda limit=5: [])
 
     events: list[dict[str, object]] = []
 
@@ -271,6 +337,7 @@ def test_main_does_not_checkout_previous_branch_when_model_fails(monkeypatch):
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
     monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "snapshot")
     monkeypatch.setattr(orchestrator, "_maybe_create_openai_client", lambda: None)
+    monkeypatch.setattr(orchestrator, "_load_recent_run_outcomes", lambda limit=5: [])
 
     checkout_commands: list[list[str]] = []
 

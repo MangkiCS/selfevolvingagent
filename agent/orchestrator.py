@@ -17,7 +17,7 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from openai import OpenAI
 
-from agent.core.event_log import append_event, log_admin_requests
+from agent.core.event_log import append_event, load_events, log_admin_requests
 from agent.core.pipeline import (
     ContextClue,
     ContextSummary,
@@ -65,6 +65,80 @@ SNAPSHOT_EXCLUDE_SUFFIXES = (
     ".pdf", ".mp4", ".zip", ".gz", ".tar", ".7z",
     ".min.js", ".min.css", ".lock", ".exe", ".dll",
 )
+
+
+def _log_run_outcome(
+    *,
+    status: str,
+    reason: str,
+    level: str = "info",
+    details: Optional[Mapping[str, Any]] = None,
+) -> None:
+    """Record a high-level outcome for the current run."""
+
+    payload: Dict[str, Any] = {"status": status, "reason": reason}
+    if details:
+        payload.update(details)
+    append_event(
+        level=level,
+        source="orchestrator",
+        message="run_outcome",
+        details=payload,
+    )
+
+
+def _load_recent_run_outcomes(limit: int = 5) -> List[Dict[str, Any]]:
+    """Return the most recent run_outcome events from the event log."""
+
+    events = load_events()
+    outcomes = [event for event in events if event.get("message") == "run_outcome"]
+    if not outcomes:
+        return []
+    outcomes.sort(key=lambda event: event.get("timestamp") or "")
+    return outcomes[-limit:]
+
+
+def _format_run_outcomes_for_prompt(
+    outcomes: Sequence[Mapping[str, Any]]
+) -> str:
+    """Format run outcome telemetry for inclusion in LLM prompts."""
+
+    if not outcomes:
+        return "- No historical run outcomes recorded yet."
+
+    lines: List[str] = []
+    for event in reversed(outcomes):
+        timestamp = str(event.get("timestamp") or "(no timestamp)")
+        details = event.get("details") or {}
+        status = str(details.get("status") or "unknown")
+        reason = str(details.get("reason") or "unspecified")
+        indicator = "✅" if status == "completed" else "⚠️"
+        extras: List[str] = []
+        branch = details.get("branch")
+        if branch:
+            extras.append(f"branch={branch}")
+        patch_count = details.get("patch_count")
+        if patch_count is not None:
+            extras.append(f"patches={patch_count}")
+        test_count = details.get("test_count")
+        if test_count is not None:
+            extras.append(f"tests={test_count}")
+        extra_text = f" ({'; '.join(extras)})" if extras else ""
+        lines.append(
+            f"- {indicator} [{timestamp}] status={status} reason={reason}{extra_text}"
+        )
+    return "\n".join(lines)
+
+
+def _render_run_outcome_section(outcomes: Sequence[Mapping[str, Any]]) -> str:
+    """Render a dedicated IMPORTANT section for recent run outcomes."""
+
+    formatted = _format_run_outcomes_for_prompt(outcomes)
+    header = (
+        "## IMPORTANT: Recent run outcomes\n"
+        "Treat ⚠️ entries as unresolved issues that require attention before pursuing new work."
+    )
+    return f"{header}\n{formatted}".strip()
 
 
 # ---------------- Shell helper (ohne shell=True) ----------------
@@ -396,7 +470,12 @@ def _format_selected_task_section(task: TaskSpec) -> str:
     return "\n".join(lines).strip()
 
 
-def _build_context_summary_prompt(task_prompt: TaskPrompt, task: TaskSpec) -> str:
+def _build_context_summary_prompt(
+    task_prompt: TaskPrompt,
+    task: TaskSpec,
+    *,
+    important_section: Optional[str] = None,
+) -> str:
     backlog_section = _format_task_prompt_section(task_prompt)
     selected_section = _format_selected_task_section(task)
     snapshot = build_repo_snapshot()
@@ -409,13 +488,17 @@ def _build_context_summary_prompt(task_prompt: TaskPrompt, task: TaskSpec) -> st
         "- `context_clues`: array (max 5) of objects with `id`, `path` (optional), `rationale`, and `content` (<= 500 characters, copy directly from the provided material when referencing code).\n"
         "Ensure clue ids follow the format `clue-1`, `clue-2`, ... for downstream reference."
     )
-    sections = [
-        instructions,
-        "\n## Task Backlog\n" + backlog_section,
-        "\n## Selected Task\n" + selected_section,
-        "\n## Repository Snapshot (truncated)\n" + snapshot,
-    ]
-    return "\n".join(sections)
+    sections = [instructions]
+    if important_section:
+        sections.append("\n" + important_section.strip())
+    sections.extend(
+        [
+            "\n## Task Backlog\n" + backlog_section,
+            "\n## Selected Task\n" + selected_section,
+            "\n## Repository Snapshot (truncated)\n" + snapshot,
+        ]
+    )
+    return "".join(sections)
 
 
 def _context_clues_to_json(clues: Sequence[ContextClue]) -> str:
@@ -469,7 +552,12 @@ def _format_retrieved_snippets(snippets: Iterable[QueryResult]) -> str:
     return _render_fragment(section_template, retrieved_snippets=block)
 
 
-def _build_retrieval_prompt(task: TaskSpec, context_summary: ContextSummary) -> str:
+def _build_retrieval_prompt(
+    task: TaskSpec,
+    context_summary: ContextSummary,
+    *,
+    important_section: Optional[str] = None,
+) -> str:
     selected_section = _format_selected_task_section(task)
     clues_json = _context_clues_to_json(context_summary.context_clues)
     instructions = (
@@ -485,13 +573,17 @@ def _build_retrieval_prompt(task: TaskSpec, context_summary: ContextSummary) -> 
     )
     summary_text = context_summary.summary or "(no summary provided)"
     clues_block = clues_json if clues_json.strip() else "[]"
-    sections = [
-        instructions,
-        "\n## Selected Task (for reference)\n" + selected_section,
-        "\n## Context Summary\n" + summary_text,
-        "\n## Candidate Context Clues\n```json\n" + clues_block + "\n```",
-    ]
-    return "\n".join(sections)
+    sections = [instructions]
+    if important_section:
+        sections.append("\n" + important_section.strip())
+    sections.extend(
+        [
+            "\n## Selected Task (for reference)\n" + selected_section,
+            "\n## Context Summary\n" + summary_text,
+            "\n## Candidate Context Clues\n```json\n" + clues_block + "\n```",
+        ]
+    )
+    return "".join(sections)
 
 
 def _format_context_clues(clues: Sequence[ContextClue]) -> str:
@@ -532,6 +624,8 @@ def _build_execution_prompt(
     task: TaskSpec,
     retrieval_brief: RetrievalBrief,
     context_clues: Sequence[ContextClue],
+    *,
+    important_section: Optional[str] = None,
 ) -> str:
     selected_section = _format_selected_task_section(task)
     context_section = _format_context_clues(context_clues)
@@ -551,17 +645,21 @@ def _build_execution_prompt(
         "- `code_patches` entries must include `path` and full file `content`.\n"
         "- Limit the scope to the provided focus paths unless the plan justifies additional files."
     )
-    sections = [
-        instructions,
-        "\n## Selected Task for Execution\n" + selected_section,
-        "\n## Retrieval Brief\n" + (retrieval_brief.brief or "(no brief provided)"),
-        "\n## Retrieved Snippets\n" + snippet_section,
-        "\n## Focus Paths\n" + focus_block,
-        "\n## Handoff Notes\n" + (retrieval_brief.handoff_notes or "(none)"),
-        "\n## Open Questions\n" + questions_block,
-        "\n## Context Excerpts\n" + context_section,
-    ]
-    return "\n".join(sections)
+    sections = [instructions]
+    if important_section:
+        sections.append("\n" + important_section.strip())
+    sections.extend(
+        [
+            "\n## Selected Task for Execution\n" + selected_section,
+            "\n## Retrieval Brief\n" + (retrieval_brief.brief or "(no brief provided)"),
+            "\n## Retrieved Snippets\n" + snippet_section,
+            "\n## Focus Paths\n" + focus_block,
+            "\n## Handoff Notes\n" + (retrieval_brief.handoff_notes or "(none)"),
+            "\n## Open Questions\n" + questions_block,
+            "\n## Context Excerpts\n" + context_section,
+        ]
+    )
+    return "".join(sections)
 
 
 def call_code_model(
@@ -751,10 +849,19 @@ def main() -> int:
         return 1
 
     if task_prompt is None:
+        _log_run_outcome(status="skipped", reason="task_prompt_unavailable")
         return 0
 
     primary_task = _select_task_for_execution(task_prompt)
     if primary_task is None:
+        _log_run_outcome(
+            status="skipped",
+            reason="no_eligible_task",
+            details={
+                "ready_task_ids": [spec.task_id for spec in task_prompt.ready],
+                "completed_task_ids": list(task_prompt.completed),
+            },
+        )
         return 0
 
     metadata = _derive_task_metadata(primary_task)
@@ -766,7 +873,10 @@ def main() -> int:
     plan_applied = False
     branch_checked_out = False
     vector_store = _get_vector_store()
+    execution_plan: ExecutionPlan | None = None
     client = _maybe_create_openai_client()
+    recent_outcomes = _load_recent_run_outcomes()
+    important_run_outcomes = _render_run_outcome_section(recent_outcomes)
     try:
         system = (ROOT / "agent/prompts/system.md").read_text(encoding="utf-8")
 
@@ -781,12 +891,20 @@ def main() -> int:
                 retrieved_snippets=[],
             )
         else:
-            context_prompt = _build_context_summary_prompt(task_prompt, primary_task)
+            context_prompt = _build_context_summary_prompt(
+                task_prompt,
+                primary_task,
+                important_section=important_run_outcomes,
+            )
             context_summary = run_context_summary(
                 client, system_prompt=system, user_prompt=context_prompt
             )
 
-            retrieval_prompt = _build_retrieval_prompt(primary_task, context_summary)
+            retrieval_prompt = _build_retrieval_prompt(
+                primary_task,
+                context_summary,
+                important_section=important_run_outcomes,
+            )
             retrieval_brief = run_retrieval_brief(
                 client,
                 system_prompt=system,
@@ -797,7 +915,12 @@ def main() -> int:
             )
 
         selected_clues = _select_context_clues(context_summary, retrieval_brief)
-        execution_prompt = _build_execution_prompt(primary_task, retrieval_brief, selected_clues)
+        execution_prompt = _build_execution_prompt(
+            primary_task,
+            retrieval_brief,
+            selected_clues,
+            important_section=important_run_outcomes,
+        )
         if client is None:
             execution_payload = call_code_model(system, execution_prompt)
         else:
@@ -824,6 +947,14 @@ def main() -> int:
                 source="orchestrator",
                 message="LLM produced no actionable patches; leaving repository unchanged.",
                 details={"stage": "execution_plan"},
+            )
+            _log_run_outcome(
+                status="skipped",
+                reason="empty_execution_plan",
+                details={
+                    "plan_steps": execution_plan.plan,
+                    "notes": execution_plan.notes,
+                },
             )
             return 0
     except LLMCallError as exc:
@@ -869,6 +1000,7 @@ def main() -> int:
         return 1
 
     if not plan_applied:
+        _log_run_outcome(status="skipped", reason="plan_not_applied")
         return 0
 
     commit_all(commit_message)
@@ -888,6 +1020,18 @@ def main() -> int:
 
     push_branch(branch_name)
     create_pull_request(branch_name, title=pr_title, body=pr_body)
+    patch_count = len(execution_plan.code_patches) if execution_plan else 0
+    test_count = len(execution_plan.new_tests) if execution_plan else 0
+    _log_run_outcome(
+        status="completed",
+        reason="changes_applied",
+        details={
+            "branch": branch_name,
+            "commit_message": commit_message,
+            "patch_count": patch_count,
+            "test_count": test_count,
+        },
+    )
     return 0
 
 
