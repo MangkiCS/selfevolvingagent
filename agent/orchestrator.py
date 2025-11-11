@@ -693,6 +693,42 @@ def create_pull_request(branch: str, *, title: str, body: str) -> Optional[int]:
 
 
 # ---------------- Main ----------------
+def _summarise_admin_request(request: Mapping[str, Any] | Any) -> str:
+    if not isinstance(request, Mapping):
+        return json.dumps(request, ensure_ascii=False)
+
+    for key in ("summary", "message", "reason", "description", "details"):
+        value = request.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    for key, value in request.items():
+        if isinstance(value, str) and value.strip():
+            return f"{key}: {value.strip()}"
+
+    return json.dumps(request, ensure_ascii=False)
+
+
+def _announce_admin_requests(requests: Sequence[Mapping[str, Any]] | Sequence[Any]) -> None:
+    if not requests:
+        return
+
+    stored = log_admin_requests(requests)
+    if not stored:
+        return
+
+    details = stored.get("details", {})
+    recorded = details.get("requests", [])
+    if not recorded:
+        return
+
+    print("\nAdmin assistance requested:")
+    for idx, request in enumerate(recorded, start=1):
+        summary = _summarise_admin_request(request)
+        print(f"  {idx}. {summary}")
+    print()
+
+
 def main() -> int:
     ensure_git_identity()
 
@@ -857,39 +893,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-# ---------------- Admin request helpers ----------------
-def _summarise_admin_request(request: Mapping[str, Any] | Any) -> str:
-    if not isinstance(request, Mapping):
-        return json.dumps(request, ensure_ascii=False)
-
-    for key in ("summary", "message", "reason", "description", "details"):
-        value = request.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-
-    for key, value in request.items():
-        if isinstance(value, str) and value.strip():
-            return f"{key}: {value.strip()}"
-
-    return json.dumps(request, ensure_ascii=False)
-
-
-def _announce_admin_requests(requests: Sequence[Mapping[str, Any]] | Sequence[Any]) -> None:
-    if not requests:
-        return
-
-    stored = log_admin_requests(requests)
-    if not stored:
-        return
-
-    details = stored.get("details", {})
-    recorded = details.get("requests", [])
-    if not recorded:
-        return
-
-    print("\nAdmin assistance requested:")
-    for idx, request in enumerate(recorded, start=1):
-        summary = _summarise_admin_request(request)
-        print(f"  {idx}. {summary}")
-    print()
-
