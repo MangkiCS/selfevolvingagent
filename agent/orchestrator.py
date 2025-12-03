@@ -269,8 +269,8 @@ def _get_vector_store() -> VectorStore:
     return _VECTOR_STORE
 
 
-def _maybe_create_openai_client() -> Optional[OpenAI]:
-    api_key = os.environ.get("OPENAI_API_KEY")
+def _maybe_create_openai_client(api_key: Optional[str] = None) -> Optional[OpenAI]:
+    api_key = api_key if api_key is not None else os.environ.get("OPENAI_API_KEY")
     if not api_key:
         append_event(
             level="warning",
@@ -670,7 +670,13 @@ def call_code_model(
 ) -> Dict[str, Any]:
     """Execute the code-generation stage and return a serialisable payload."""
 
-    runner = client or OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    if client is None:
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY is required to call the code model.")
+        runner = OpenAI(api_key=api_key)
+    else:
+        runner = client
     execution_plan = run_execution_plan(runner, system_prompt=system_prompt, user_prompt=user_prompt)
     payload = execution_plan.to_dict()
     if execution_plan.notes:
@@ -874,7 +880,11 @@ def main() -> int:
     branch_checked_out = False
     vector_store = _get_vector_store()
     execution_plan: ExecutionPlan | None = None
-    client = _maybe_create_openai_client()
+    api_key = os.environ.get("OPENAI_API_KEY")
+    client = _maybe_create_openai_client(api_key)
+    if client is None and not api_key:
+        _log_run_outcome(status="skipped", reason="credentials_missing")
+        return 0
     recent_outcomes = _load_recent_run_outcomes()
     important_run_outcomes = _render_run_outcome_section(recent_outcomes)
     try:

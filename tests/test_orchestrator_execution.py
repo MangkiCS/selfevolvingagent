@@ -19,6 +19,11 @@ def isolate_task_catalog():
         orchestrator._TASK_CATALOG.update(original)
 
 
+@pytest.fixture(autouse=True)
+def clear_openai_key(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+
 def _make_task_prompt(*ready_specs: TaskSpec) -> TaskPrompt:
     batch = TaskBatch(ready=tuple(ready_specs), blocked=(), completed=())
     return TaskPrompt(batch=batch, prompt="Ready tasks available.")
@@ -72,6 +77,9 @@ def test_format_selected_task_section_includes_key_fields():
 
 
 def test_main_executes_task_without_placeholder_artifacts(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setattr(orchestrator, "_maybe_create_openai_client", lambda api_key=None: None)
+
     spec = TaskSpec(
         task_id="task/execute",
         title="Execute orchestrated task",
@@ -178,6 +186,9 @@ def test_main_executes_task_without_placeholder_artifacts(monkeypatch):
 
 
 def test_main_skips_when_model_returns_no_plan(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setattr(orchestrator, "_maybe_create_openai_client", lambda api_key=None: None)
+
     spec = TaskSpec(
         task_id="task/skip",
         title="Skip when no plan",
@@ -231,7 +242,54 @@ def test_main_skips_when_model_returns_no_plan(monkeypatch):
     assert outcome_details["reason"] == "empty_execution_plan"
 
 
+def test_main_skips_when_credentials_missing(monkeypatch):
+    spec = TaskSpec(
+        task_id="task/needs-creds",
+        title="Credentials required",
+        summary="Skip execution when OpenAI credentials are absent.",
+        priority="high",
+    )
+
+    task_prompt = _make_task_prompt(spec)
+
+    monkeypatch.setattr(orchestrator, "load_available_tasks", lambda: [spec])
+    monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
+    monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
+    monkeypatch.setattr(orchestrator, "_get_vector_store", lambda: None)
+    monkeypatch.setattr(orchestrator, "_load_recent_run_outcomes", lambda limit=5: [])
+
+    events: list[dict[str, object]] = []
+
+    def fake_append_event(*, level, source, message, details=None):  # type: ignore[no-untyped-def]
+        entry = {
+            "level": level,
+            "source": source,
+            "message": message,
+            "details": details or {},
+        }
+        events.append(entry)
+        return entry
+
+    monkeypatch.setattr(orchestrator, "append_event", fake_append_event)
+
+    def fail_call_code_model(*_args, **_kwargs):
+        raise AssertionError("call_code_model should not run without credentials")
+
+    monkeypatch.setattr(orchestrator, "call_code_model", fail_call_code_model)
+
+    result = orchestrator.main()
+
+    assert result == 0
+
+    outcome_events = [event for event in events if event["message"] == "run_outcome"]
+    assert outcome_events, "expected orchestrator to record run outcome"
+    assert outcome_events[-1]["details"]["reason"] == "credentials_missing"
+
+
 def test_admin_requests_are_logged_and_announced(monkeypatch, capsys):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    monkeypatch.setattr(orchestrator, "_maybe_create_openai_client", lambda api_key=None: None)
+
     spec = TaskSpec(
         task_id="task/admin",
         title="Surface admin requests",
@@ -266,6 +324,8 @@ def test_admin_requests_are_logged_and_announced(monkeypatch, capsys):
 
 
 def test_main_surfaces_stage_metadata_on_llm_failure(monkeypatch, capsys):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+
     spec = TaskSpec(
         task_id="task/failure",
         title="Handle failures",
@@ -279,7 +339,7 @@ def test_main_surfaces_stage_metadata_on_llm_failure(monkeypatch, capsys):
     monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
     monkeypatch.setattr(orchestrator, "_get_vector_store", lambda: None)
-    monkeypatch.setattr(orchestrator, "_maybe_create_openai_client", lambda: None)
+    monkeypatch.setattr(orchestrator, "_maybe_create_openai_client", lambda api_key=None: None)
     monkeypatch.setattr(orchestrator, "_load_recent_run_outcomes", lambda limit=5: [])
 
     events: list[dict[str, object]] = []
@@ -323,6 +383,8 @@ def test_main_surfaces_stage_metadata_on_llm_failure(monkeypatch, capsys):
 
 
 def test_main_does_not_checkout_previous_branch_when_model_fails(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+
     spec = TaskSpec(
         task_id="task/failure",
         title="Handle model failure",
@@ -336,7 +398,7 @@ def test_main_does_not_checkout_previous_branch_when_model_fails(monkeypatch):
     monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
     monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "snapshot")
-    monkeypatch.setattr(orchestrator, "_maybe_create_openai_client", lambda: None)
+    monkeypatch.setattr(orchestrator, "_maybe_create_openai_client", lambda api_key=None: None)
     monkeypatch.setattr(orchestrator, "_load_recent_run_outcomes", lambda limit=5: [])
 
     checkout_commands: list[list[str]] = []
