@@ -282,8 +282,8 @@ def _get_completed_store() -> CompletedTaskStore:
     return _COMPLETED_STORE
 
 
-def _maybe_create_openai_client() -> Optional[OpenAI]:
-    api_key = os.environ.get("OPENAI_API_KEY")
+def _maybe_create_openai_client(api_key: str | None = None) -> Optional[OpenAI]:
+    api_key = api_key or os.environ.get("OPENAI_API_KEY")
     if not api_key:
         append_event(
             level="warning",
