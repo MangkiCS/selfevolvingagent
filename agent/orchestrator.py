@@ -34,6 +34,7 @@ from agent.core.task_context import (
     TaskPrompt,
     load_task_prompt,
 )
+from agent.core.task_state import CompletedTaskStore
 from agent.core.task_loader import TaskSpecLoadingError, load_task_specs
 from agent.core.task_selection import (
     refresh_vector_cache,
@@ -52,6 +53,7 @@ MAX_RETRIEVED_SNIPPETS = 3
 # Cached catalogue populated during startup for downstream task selection.
 _TASK_CATALOG: Dict[str, TaskSpec] = {}
 _VECTOR_STORE: Optional[VectorStore] = None
+_COMPLETED_STORE: Optional[CompletedTaskStore] = None
 
 # Optional override for the next auto branch name.
 _PREFERRED_BRANCH_NAME: Optional[str] = None
@@ -269,6 +271,17 @@ def _get_vector_store() -> VectorStore:
     return _VECTOR_STORE
 
 
+def _get_completed_store() -> CompletedTaskStore:
+    """Return the shared completed-task store, reloading persisted state."""
+
+    global _COMPLETED_STORE
+    if _COMPLETED_STORE is None:
+        _COMPLETED_STORE = CompletedTaskStore()
+    else:
+        _COMPLETED_STORE.reload()
+    return _COMPLETED_STORE
+
+
 def _maybe_create_openai_client() -> Optional[OpenAI]:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
@@ -312,9 +325,13 @@ def load_available_tasks() -> List[TaskSpec]:
     return specs
 
 
-def _prepare_task_prompt() -> Optional[TaskPrompt]:
+def _prepare_task_prompt(completed_store: CompletedTaskStore) -> Optional[TaskPrompt]:
     try:
-        task_prompt = load_task_prompt(DEFAULT_TASKS_DIR)
+        task_prompt = load_task_prompt(
+            DEFAULT_TASKS_DIR,
+            completed=completed_store.completed,
+            state_path=completed_store.path,
+        )
     except TaskContextError as exc:
         append_event(
             level="error",
@@ -380,7 +397,10 @@ def _select_task_for_execution(task_prompt: TaskPrompt) -> Optional[TaskSpec]:
         )
 
     completed_ids = set(task_prompt.completed)
-    task = select_next_task(resolved_ready, completed=completed_ids)
+    eligible_ready = [
+        spec for spec in resolved_ready if spec.task_id not in completed_ids
+    ]
+    task = select_next_task(eligible_ready, completed=completed_ids)
     if task is None:
         append_event(
             level="info",
@@ -830,6 +850,8 @@ def _announce_admin_requests(requests: Sequence[Mapping[str, Any]] | Sequence[An
 def main() -> int:
     ensure_git_identity()
 
+    completed_store = _get_completed_store()
+
     try:
         load_available_tasks()
     except TaskContextError as exc:
@@ -843,7 +865,7 @@ def main() -> int:
         return 1
 
     try:
-        task_prompt = _prepare_task_prompt()
+        task_prompt = _prepare_task_prompt(completed_store)
     except TaskContextError as exc:
         print(f"Failed to prepare task prompt: {exc}", file=sys.stderr)
         return 1
@@ -1032,6 +1054,7 @@ def main() -> int:
             "test_count": test_count,
         },
     )
+    completed_store.mark_completed(primary_task.task_id)
     return 0
 
 

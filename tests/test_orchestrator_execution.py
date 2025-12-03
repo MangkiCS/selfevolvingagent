@@ -19,8 +19,20 @@ def isolate_task_catalog():
         orchestrator._TASK_CATALOG.update(original)
 
 
-def _make_task_prompt(*ready_specs: TaskSpec) -> TaskPrompt:
-    batch = TaskBatch(ready=tuple(ready_specs), blocked=(), completed=())
+@pytest.fixture(autouse=True)
+def isolate_completed_store():
+    original = orchestrator._COMPLETED_STORE
+    orchestrator._COMPLETED_STORE = None
+    try:
+        yield
+    finally:
+        orchestrator._COMPLETED_STORE = original
+
+
+def _make_task_prompt(
+    *ready_specs: TaskSpec, completed: tuple[str, ...] = ()
+) -> TaskPrompt:
+    batch = TaskBatch(ready=tuple(ready_specs), blocked=(), completed=completed)
     return TaskPrompt(batch=batch, prompt="Ready tasks available.")
 
 
@@ -46,6 +58,31 @@ def test_select_task_for_execution_prefers_higher_priority():
     selected = orchestrator._select_task_for_execution(task_prompt)
     assert selected is not None
     assert selected.task_id == critical.task_id
+
+
+def test_select_task_for_execution_skips_completed_tasks():
+    completed = ("task/completed",)
+    done = TaskSpec(
+        task_id="task/completed",
+        title="Completed task",
+        summary="Should be ignored",
+        priority="high",
+    )
+    pending = TaskSpec(
+        task_id="task/pending",
+        title="Pending task",
+        summary="Should be selected",
+        priority="medium",
+    )
+
+    orchestrator._TASK_CATALOG[done.task_id] = done
+    orchestrator._TASK_CATALOG[pending.task_id] = pending
+
+    task_prompt = _make_task_prompt(done, pending, completed=completed)
+
+    selected = orchestrator._select_task_for_execution(task_prompt)
+    assert selected is not None
+    assert selected.task_id == pending.task_id
 
 
 def test_format_selected_task_section_includes_key_fields():
@@ -91,7 +128,9 @@ def test_main_executes_task_without_placeholder_artifacts(monkeypatch):
         return [spec]
 
     monkeypatch.setattr(orchestrator, "load_available_tasks", fake_load_available_tasks)
-    monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
+    monkeypatch.setattr(
+        orchestrator, "load_task_prompt", lambda _dir=None, **kwargs: task_prompt
+    )
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
     monkeypatch.setattr(orchestrator, "create_branch", lambda: "auto/test-branch")
     monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "_snapshot_")
@@ -177,6 +216,54 @@ def test_main_executes_task_without_placeholder_artifacts(monkeypatch):
     assert outcome_details["test_count"] == 0
 
 
+def test_main_marks_task_completed(monkeypatch, tmp_path):
+    spec = TaskSpec(
+        task_id="task/stateful",
+        title="Persist completed tasks",
+        summary="Ensure orchestrator records successful task completion.",
+        priority="high",
+    )
+
+    state_path = tmp_path / "task_state.json"
+    store = orchestrator.CompletedTaskStore(path=state_path)
+    orchestrator._COMPLETED_STORE = store
+
+    task_prompt = _make_task_prompt(spec, completed=store.completed)
+
+    monkeypatch.setattr(orchestrator, "load_available_tasks", lambda: [spec])
+
+    def fake_load_task_prompt(_dir=None, **kwargs):  # type: ignore[no-untyped-def]
+        assert kwargs.get("completed") == store.completed
+        return task_prompt
+
+    monkeypatch.setattr(orchestrator, "load_task_prompt", fake_load_task_prompt)
+    monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
+    monkeypatch.setattr(orchestrator, "create_branch", lambda: "auto/test-branch")
+    monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "_snapshot_")
+    monkeypatch.setattr(orchestrator, "_load_recent_run_outcomes", lambda limit=5: [])
+    monkeypatch.setattr(orchestrator, "_get_vector_store", lambda: None)
+    monkeypatch.setattr(orchestrator, "_maybe_create_openai_client", lambda: None)
+
+    writes: list[tuple[str, str]] = []
+    monkeypatch.setattr(orchestrator, "write", lambda path, content: writes.append((path, content)))
+    monkeypatch.setattr(orchestrator, "commit_all", lambda message: None)
+    monkeypatch.setattr(orchestrator, "push_branch", lambda branch: None)
+    monkeypatch.setattr(orchestrator, "create_pull_request", lambda branch, title, body: None)
+
+    monkeypatch.setattr(
+        orchestrator,
+        "call_code_model",
+        lambda system, user: {"code_patches": [{"path": "docs/progress.md", "content": "ok"}]},
+    )
+
+    result = orchestrator.main()
+    assert result == 0
+
+    assert store.is_completed(spec.task_id)
+    assert state_path.exists()
+    assert "task/stateful" in state_path.read_text(encoding="utf-8")
+
+
 def test_main_skips_when_model_returns_no_plan(monkeypatch):
     spec = TaskSpec(
         task_id="task/skip",
@@ -188,7 +275,9 @@ def test_main_skips_when_model_returns_no_plan(monkeypatch):
     task_prompt = _make_task_prompt(spec)
 
     monkeypatch.setattr(orchestrator, "load_available_tasks", lambda: [spec])
-    monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
+    monkeypatch.setattr(
+        orchestrator, "load_task_prompt", lambda _dir=None, **kwargs: task_prompt
+    )
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
     monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "_snapshot_")
     monkeypatch.setattr(orchestrator, "_load_recent_run_outcomes", lambda limit=5: [])
@@ -242,7 +331,9 @@ def test_admin_requests_are_logged_and_announced(monkeypatch, capsys):
     task_prompt = _make_task_prompt(spec)
 
     monkeypatch.setattr(orchestrator, "load_available_tasks", lambda: [spec])
-    monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
+    monkeypatch.setattr(
+        orchestrator, "load_task_prompt", lambda _dir=None, **kwargs: task_prompt
+    )
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
     monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "snapshot")
     monkeypatch.setattr(orchestrator, "_load_recent_run_outcomes", lambda limit=5: [])
@@ -276,7 +367,9 @@ def test_main_surfaces_stage_metadata_on_llm_failure(monkeypatch, capsys):
     task_prompt = _make_task_prompt(spec)
 
     monkeypatch.setattr(orchestrator, "load_available_tasks", lambda: [spec])
-    monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
+    monkeypatch.setattr(
+        orchestrator, "load_task_prompt", lambda _dir=None, **kwargs: task_prompt
+    )
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
     monkeypatch.setattr(orchestrator, "_get_vector_store", lambda: None)
     monkeypatch.setattr(orchestrator, "_maybe_create_openai_client", lambda: None)
@@ -333,7 +426,9 @@ def test_main_does_not_checkout_previous_branch_when_model_fails(monkeypatch):
     task_prompt = _make_task_prompt(spec)
 
     monkeypatch.setattr(orchestrator, "load_available_tasks", lambda: [spec])
-    monkeypatch.setattr(orchestrator, "load_task_prompt", lambda _dir=None: task_prompt)
+    monkeypatch.setattr(
+        orchestrator, "load_task_prompt", lambda _dir=None, **kwargs: task_prompt
+    )
     monkeypatch.setattr(orchestrator, "ensure_git_identity", lambda: None)
     monkeypatch.setattr(orchestrator, "build_repo_snapshot", lambda **_: "snapshot")
     monkeypatch.setattr(orchestrator, "_maybe_create_openai_client", lambda: None)
